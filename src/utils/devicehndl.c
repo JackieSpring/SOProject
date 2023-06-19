@@ -2,7 +2,7 @@
 #include "devicehndl.h"
 
 
-
+/*  
 static ssize_t _pwrapper( ssize_t (* funptr)( int, char *, size_t ), int fd, char * buf, size_t size, off_t off ) {
     off_t ofp;
     int ret;
@@ -21,7 +21,13 @@ static ssize_t _pwrapper( ssize_t (* funptr)( int, char *, size_t ), int fd, cha
 
     return ret;
 }
+
+#ifndef puts
+#error "errno undefined"
+#endif
+
 #ifndef pread
+#error "pread not defined"
 ssize_t pread( int fd, char * buf, size_t size, off_t off ) {
     return _pwrapper( read, fd, buf, size, off );
 }
@@ -31,12 +37,9 @@ ssize_t pwrite( int fd, char * buf, size_t size, off_t off ) {
     return _pwrapper( write, fd, buf, size, off );
 }
 #endif
+*/
 
-
-struct deviceStruct {
-    struct stat dstat;
-    int dd;
-}
+struct DeviceStruct;
 
 
 DEVICE * openDev( char * path ) {
@@ -62,6 +65,11 @@ cleanup:
     return NULL;
 
 }
+void closeDev( DEVICE * dev ) {
+    close( dev->dd );
+    free( dev );
+}
+
 
 ssize_t readDev( DEVICE * dev, char * buf, size_t size, off_t off ) {
     ssize_t ret;
@@ -81,7 +89,7 @@ ssize_t readDev( DEVICE * dev, char * buf, size_t size, off_t off ) {
     return read_byte;
 }
 
-ssize_t writeDev( DEVICE * dev, const char * buf, size_t size ) {
+ssize_t writeDev( DEVICE * dev, const char * buf, size_t size, off_t off ) {
     ssize_t ret;
     ssize_t write_byte = 0;
 
@@ -102,10 +110,6 @@ off_t seekDev( DEVICE * dev, off_t off, int whence ) {
     return lseek( dev->dd, off, whence );
 }
 
-
-void closeDev( DEVICE * dev ) {
-    close( dev->dd );
-}
 
 
 

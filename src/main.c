@@ -10,6 +10,7 @@
 #include <assert.h>
 
 #include "utils/devicehndl.h"
+#include "utils/logger.h"
 
 
 #ifndef bool
@@ -19,9 +20,11 @@
 #define DEV_DEFAULT "/tmp/sdo0"
 
 #define OPTION(t, p)    { t, offsetof(struct options, p), 1 }
+#define cleanup_escape( log, msg ) do{ notifyError(log, msg); goto cleanup; }while(0)
 
 
 DEVICE * dev;
+Logger * log;
 
 static struct options {
     const char * device;
@@ -31,8 +34,10 @@ static struct options {
 
 
 static const struct fuse_opt option_spec[] = {
-	OPTION("-d=%s", device),
-    OPTION("-l=%s", logfile),
+	OPTION("-dev %s", device),
+    OPTION("-log %s", logfile),
+	OPTION("-dev=%s", device),
+    OPTION("-log=%s", logfile),
 	OPTION("-h", help),
 	OPTION("--help", help),
 	FUSE_OPT_END
@@ -61,11 +66,6 @@ rename      // rinomina file
 
 
 static void * of_init( struct fuse_conn_info * fi, struct fuse_config * cfg ) {
-
-    struct fuse_context * fctx = fuse_get_context();
-
-    printf( "fuse context fuse: %p uid: %d gid: %d pid: %d umask: %d\n", fctx->fuse, fctx->uid, fctx->gid, fctx->pid, fctx->umask );
-
     return NULL;
 }
 
@@ -118,8 +118,11 @@ int main(int argc , char * argv[]) {
     int ret ;
     struct fuse_args args = FUSE_ARGS_INIT( argc, argv );
 
-    options.device = DEV_DEFAULT;
+    // Interprete argomenti
+
+    options.device = strdup(DEV_DEFAULT);
     options.logfile = NULL;
+    options.help = 0;
 
     if ( fuse_opt_parse( &args, &options, option_spec, NULL ) < 0 )
         return 1;
@@ -130,19 +133,46 @@ int main(int argc , char * argv[]) {
 		args.argv[0][0] = '\0';
 	}
 
+    // Apertura del logger
+puts("BBB");
+    FILE * logfile = NULL;
+    if ( options.logfile )
+        logfile = fopen( options.logfile, "a" );
+    
+    log = newLogger(logfile);
+
+    notifyMessage(log, "%s", "ciao");
+
+    printf( "dev: %s", options.device );
+puts("AAAA");
+    fflush(stdout);
+
     // Apertura device
 
-    if ( options.device ) {
-        dev = openDev( options.device );
-        if ( dev == NULL )
-            return 1;
-        
-
+    //if ( access( options.device, R_OK | W_OK ) < 0 )
+    //    cleanup_escape( log, "Device read/write not allowed" );
+    
+    dev = openDev( options.device );
+    if ( dev == NULL ) {
+        if ( errno == EACCES )
+            cleanup_escape( log, "Device access not allowed" );
+        else 
+            cleanup_escape( log, "Something went wrong while trying to open the device" );
     }
+
+    printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
     
 
 	ret = fuse_main(args.argc, args.argv, &of_ops, NULL);
 	fuse_opt_free_args(&args);
+    //closeLogger(log);
 	return ret;
+
+cleanup:
+	fuse_opt_free_args(&args);
+
+    perror( "program exited with failure" );
+
+    return 1;
 }
 
