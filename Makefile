@@ -16,6 +16,9 @@ LIBS_NAME := fuse3
 
 CFLAGS = $(foreach path, $(SRC_PATH), -I $(path) ) `pkg-config --libs fuse3` -o $(OUTPUT)
 
+debug:
+	@$(CC) $(SRC) -w $(CFLAGS) -g
+
 compile:
 	@$(CC) $(SRC) -w $(CFLAGS)
 

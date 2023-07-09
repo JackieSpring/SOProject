@@ -134,7 +134,7 @@ int main(int argc , char * argv[]) {
 	}
 
     // Apertura del logger
-puts("BBB");
+
     FILE * logfile = NULL;
     if ( options.logfile )
         logfile = fopen( options.logfile, "a" );
@@ -143,8 +143,8 @@ puts("BBB");
 
     notifyMessage(log, "%s", "ciao");
 
-    printf( "dev: %s", options.device );
-puts("AAAA");
+    printf( "dev: %s\n", options.device );
+
     fflush(stdout);
 
     // Apertura device
@@ -159,6 +159,8 @@ puts("AAAA");
         else 
             cleanup_escape( log, "Something went wrong while trying to open the device" );
     }
+
+    ofsFormatDevice(dev);
 
     printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
     
