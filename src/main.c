@@ -160,10 +160,22 @@ int main(int argc , char * argv[]) {
             cleanup_escape( log, "Something went wrong while trying to open the device" );
     }
 
-    ofsFormatDevice(dev);
+    if ( ofsIsDeviceFormatted(dev) )
+        notifyMessage(log, "Il device è gia stato formattato");
+    else {
+        notifyMessage( log, "Il device deve essere formattao" );
 
+        if ( ofsFormatDevice(dev) )
+            notifyError( log, "Errore durante la formattazione del device");
+    }
     printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
     
+
+// DEBUGGGGGG
+
+    return 0;
+
+// DEBUGGGGG
 
 	ret = fuse_main(args.argc, args.argv, &of_ops, NULL);
 	fuse_opt_free_args(&args);

@@ -68,6 +68,7 @@ static inline OFSPtr_t ofsSectorToCluster( OFSBoot_t * ofsb, OFSSec_t sp ){
 int ofsFormatDevice( DEVICE * dev ) {
     OFSBoot_t boot;
     OFSDentry_t rootd;
+    int ret = 0;
 
     boot.magic = OFS_MAGIC;
     boot.version = OFS_VERSION;
@@ -99,6 +100,9 @@ int ofsFormatDevice( DEVICE * dev ) {
     // tutte le entry non corrispondenti a cluster reali
     // (ovvero quelle oltre la tabella) sono marchiate come
     // INVALID
+    // Inizializza root directory (vuota) e linked clist di
+    // cluster liberi, inoltre inizializza i relativi campi
+    // nel boot sector 
 
     OFSPtr_t fatPages = ( boot.first_sec - boot.fat_sec ) / boot.cls_size ;
     uint64_t fatPageSize = boot.cls_size * boot.sec_size ;
@@ -110,7 +114,7 @@ int ofsFormatDevice( DEVICE * dev ) {
     for ( OFSPtr_t page = 0 ; page < fatPages; page++ ) {
 
         for ( uint64_t i = 0; i < fatPageEntries; i++ ){
-            fat_page[i] = counter;
+            fat_page[i] = counter + 1;
             counter++;
         }
 
@@ -120,17 +124,29 @@ int ofsFormatDevice( DEVICE * dev ) {
             fat_page[ fatPageEntries - ovf - 1 ] = OFS_LAST_CLUSTER;
         }
 
+        // Inizializza cluster riservati, cluster liberi e root directory
         if ( page == 0 ) {
-            fat_page[0] = (OFSPtr_t) OFS_RESERVED_CLUSTER;
-            fat_page[1] = (OFSPtr_t) OFS_RESERVED_CLUSTER;
+            for ( uint64_t i = 0; i < OFS_FIRST_DATA_CLUSTER ; i++ )
+                fat_page[i] = (OFSPtr_t) OFS_RESERVED_CLUSTER;
+            
+            fat_page[ OFS_FIRST_DATA_CLUSTER ] = OFS_LAST_CLUSTER;
+            boot.root_dir_ptr = OFS_FIRST_DATA_CLUSTER;
+
+            boot.free_ptr = OFS_FIRST_DATA_CLUSTER + 1;
+            boot.free_cls_cnt = boot.cls_cnt - OFS_FIRST_DATA_CLUSTER - 1;
+
         }
 
-        writeDev( dev, fat_page, fatPageSize, (boot.fat_sec * boot.sec_size) + (fatPageSize * page ) );
+        ret = writeDev( dev, fat_page, fatPageSize, (boot.fat_sec * boot.sec_size) + (fatPageSize * page ) );
+        if ( ret < 1 )
+            goto cleanup;
     }
 
-    // ROOT directory
 
     // Boot 
+    ret = writeDev( dev, &boot, sizeof( OFSBoot_t ), 0 );
+    if ( ret < 1 )
+        goto cleanup;
 
 
     return 0;
@@ -141,5 +157,18 @@ cleanup:
         free(fat_page);
 
     return -1;
+    
+}
+
+bool ofsIsDeviceFormatted( DEVICE * dev ) {
+    uint32_t magic = 0;
+
+    if ( readDev( dev, &magic, 3, 0 ) < 3 )
+        return false;
+
+    if ( magic - OFS_MAGIC )
+        return false;
+
+    return true;
     
 }

@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "devicehndl.h"
+#include "generic.h"
 
 #define OFS_MAGIC 0x4c494f // OIL Little Endian
 #define OFS_MAGIC_SIZE 3
@@ -15,6 +16,7 @@
 #define OFS_RESERVED_CLUSTER_COUNT 3
 #define OFS_FILENAME_SAMPLE_SIZE 19
 #define OFS_FILENAME_MAX_SAMPLES 1
+#define OFS_FIRST_DATA_CLUSTER 2
 
 typedef uint32_t OFSPtr_t;
 typedef uint8_t OFSClsSize_t;
@@ -61,6 +63,7 @@ typedef struct __attribute__((__packed__)) OFSDentryStruct {
 
 
 int ofsFormatDevice( DEVICE * dev );
+bool ofsIsDeviceFormatted( DEVICE * dev );
 
 
 
