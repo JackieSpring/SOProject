@@ -9,8 +9,11 @@
 #include <stddef.h>
 #include <assert.h>
 
+#include "utils/generic.h"
 #include "utils/devicehndl.h"
 #include "utils/logger.h"
+#include "ofs/ofsStructures.h"
+#include "ofs/ofsModel.h"
 
 
 #ifndef bool
@@ -169,6 +172,17 @@ int main(int argc , char * argv[]) {
             notifyError( log, "Errore durante la formattazione del device");
     }
     printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
+
+    OFS_t * ofs = ofsOpen( dev );
+    if ( ! ofs )
+        perror("OFS non è stato aperto");
+
+    printf( "boot: %p\n", ofs->boot );
+    printf( "fat: %p\n", ofs->fat);
+    printf( "fat size: %p\n", ofs->fat_size);
+
+    ofsClose( ofs );
+
     
 
 // DEBUGGGGGG
