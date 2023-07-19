@@ -24,5 +24,3 @@ compile:
 
 #run: compile
 #	@./$(OUTPUT)
-
-

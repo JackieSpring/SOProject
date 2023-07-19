@@ -18,12 +18,6 @@
 
 
 
-void __attribute__((constructor)) a(){
-    printf( "ofsStructures size: %d\n", sizeof(OFSBoot_t) );
-}
-
-
-
 static inline OFSClsSize_t ofsCalculateClusterSize( OFSBoot_t * ofsb ) {
     return 2;   // TODO migliorare il calcolo
 }
@@ -53,14 +47,17 @@ static inline OFSSec_t ofsCalculateFirstSec( OFSBoot_t * ofsb ) {
 }
 
 
-static inline OFSSec_t ofsClusterToSector( OFSBoot_t * ofsb, OFSPtr_t cp ) {
-    return ofsb->first_sec + ( cp * ofsb->sec_size * ofsb->cls_size );
+extern inline OFSSec_t ofsClusterToSector( OFSBoot_t * ofsb, OFSPtr_t cp ) {
+    return ofsb->first_sec + ( cp * ofsb->cls_size );
 }
 
-static inline OFSPtr_t ofsSectorToCluster( OFSBoot_t * ofsb, OFSSec_t sp ){
-    return ( sp - ofsb->first_sec ) / ( ofsb->sec_size * ofsb->cls_size ) ;
+extern inline OFSPtr_t ofsSectorToCluster( OFSBoot_t * ofsb, OFSSec_t sp ){
+    return ( sp - ofsb->first_sec ) / ( ofsb->cls_size ) ;
 }
 
+extern inline off_t ofsSectorToByte( OFSBoot_t * ofsb, OFSSec_t sp ) {
+    return sp * ofsb->sec_size ;
+}
 
 
 

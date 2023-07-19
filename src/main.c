@@ -14,6 +14,7 @@
 #include "utils/logger.h"
 #include "ofs/ofsStructures.h"
 #include "ofs/ofsModel.h"
+#include "ofs/ofsListType.h"
 
 
 #ifndef bool
@@ -181,7 +182,48 @@ int main(int argc , char * argv[]) {
     printf( "fat: %p\n", ofs->fat);
     printf( "fat size: %p\n", ofs->fat_size);
 
+
+    OFSCluster_t * cls = ofsGetCluster(ofs, ofs->boot->free_ptr);
+
+    if ( cls == NULL ){
+        perror("get cluster");
+        return 0;
+    }
+
+    printf( "n: %lu\n", cls->cls_number );
+    printf( "next: %lu\n", cls->next);
+    printf( "size: %lu\n", cls->size );
+    printf( "data: %p\n", cls->data );
+
+    ofsFreeCluster(cls);
+
+    OFSPtrList_t * list = createList(ofs->fat, ofs->boot->root_dir_ptr);
+
+    assert( list != NULL );
+
+    printf( "size: %lu\n", list->size );
+    printf( "head: %lu\n", list->head );
+    printf( "tail: %lu\n", list->tail );
+    printf( "zero: %lu\n\n", getItem(list, 0) );
+
+    appendItem(list, 3);
+
+    printf( "size: %lu\n", list->size );
+    printf( "head: %lu\n", list->head );
+    printf( "tail: %lu\n", list->tail );
+    printf( "zero: %lu\n\n", getItem(list, 0) );
+
+    popItem( list );
+    popItem( list );
+
+    printf( "size: %lu\n", list->size );
+    printf( "head: %lu\n", list->head );
+    printf( "tail: %lu\n", list->tail );
+    printf( "zero: %lu\n\n", getItem(list, 0) );
+
     ofsClose( ofs );
+
+    printf( "fname: %lu\n", sizeof( OFSDentry_t ) );
 
     
 
