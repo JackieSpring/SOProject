@@ -16,7 +16,9 @@ typedef struct OFSPtrListStruct_t {
 //OFSPtrList_t * createList( OFSPtr_t size );
 //int initList( OFSPtrList_t * list, OFSPtr_t * fat, OFSPtr_t start );
 OFSPtrList_t * createList( OFSPtr_t * fat, OFSPtr_t start );
+void destroyList( OFSPtrList_t * list );
+
 OFSPtr_t getItem( OFSPtrList_t * list, off_t idx );
+
 OFSPtr_t appendItem( OFSPtrList_t * list , OFSPtr_t item );
 OFSPtr_t popItem( OFSPtrList_t * list ) ;
-void destroyList( OFSPtrList_t * list );

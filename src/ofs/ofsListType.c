@@ -68,7 +68,6 @@ cleanup:
 }
 
 
-
 OFSPtr_t getItem( OFSPtrList_t * list, off_t idx ) {
     if ( ! list )
         goto cleanup;

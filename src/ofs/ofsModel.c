@@ -337,6 +337,8 @@ int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent ) {
     if ( flagFound == false )
         goto cleanup;
 
+
+
     return 0;
 
 cleanup:
@@ -475,4 +477,60 @@ cleanup:
         free_str_arr(path_arr);
 
     return NULL;
+}
+
+
+
+
+typedef bool (* directory_iterator) ( OFSDentry_t * dentry, void * extra );
+
+
+int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callback, void * extra ){
+
+    if ( ! ( ofs && dir && callback ) )
+        return -1;
+
+    if ( dir->flags & OFS_FLAG_INVALID )
+        return -1;
+
+    if ( ! (dir->flags & OFS_FLAG_DIR) )
+        return -1;
+    
+
+    OFSPtrList_t * pList    = NULL;
+    OFSDentry_t * sample    = NULL;
+    OFSDentry_t * dentryList= NULL;
+    OFSCluster_t * cls      = NULL;
+    bool flagRun;
+
+    pList = dir->cls_list;
+    flagRun = true;
+
+    for ( OFSPtr_t cindex = 0 ; (cindex < pList->size) && flagRun ; cindex++ ) {
+        cls = ofsGetCluster(ofs, getItem(pList, cindex));
+
+        if ( cls == NULL )
+            goto cleanup;
+
+        dentryList = (OFSDentry_t *) cls->data;
+
+        for ( uint64_t i = 0; i < (cls->size / sizeof(OFSDentry_t) ); i++ ) {
+            if ( callback( &dentryList[i], extra ) )
+                continue;
+
+            flagRun = false;
+            break;
+        
+        }
+
+        ofsFreeCluster(cls);
+    }
+
+
+    return 0;
+
+cleanup:
+
+    return -1;
+
 }

@@ -1,6 +1,4 @@
 
-#include <sys/fcntl.h>
-#include <sys/stat.h>
 #define FUSE_USE_VERSION 31
 
 #include <fuse3/fuse.h>
@@ -22,12 +20,6 @@
 #include "ofs/ofsListType.h"
 #include "hooks/directories.h"
 
-
-
-
-#ifndef bool
-    #define bool int
-#endif
 
 #define DEV_DEFAULT "/tmp/sdo0"
 

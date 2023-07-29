@@ -3,31 +3,25 @@
 #include "directories.h"
 
 
-int of_opendir (const char * path, struct fuse_file_info * fi){
-    notifyMessage(logger, "OPENDIR %s\n", path);
+
+
+int ofs_opendir (const char * path, struct fuse_file_info * fi) {
 
     return 0;
 }
 
-int of_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi) {
+int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi) {
 
     struct fuse_context * fc = fuse_get_context();
     OFS_t * ofs = fc->private_data;
     OFSFile_t * file = NULL;
     int errcode = 0;
 
-    file = ofsGetPathFile(ofs, path);
+    file = ofsGetPathFile(ofs, (char *) path);
 
     if ( file == NULL )
-        return -ENOENT;
-        //cleanup_errno(ENOENT);
-    /*{
-        notifyError(logger, "GETATTR err path %s\n", path);
-        return -ENOENT;
-    }*/
+        cleanup_errno(ENOENT);
 
-    //if ( file->flags & ( OFS_FLAG_HIDDEN | OFS_FLAG_INVALID ) )
-    //    return -ENOENT;
 
     memset( stbuf, 0, sizeof( struct stat ) );
 
@@ -55,8 +49,8 @@ int of_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi)
         stbuf->st_mode &= S_IRUSR;
 
 
-    //if ( file != ofs->root_dir )
-    //    ofsCloseFile(file);
+    if ( file != ofs->root_dir )
+        ofsCloseFile(file);
 
     return errcode;
 
@@ -71,16 +65,42 @@ cleanup:
 
 
 
-int of_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
 
-    OFS_t * ofs = NULL;
+
+typedef struct DirIteratorToolsStruct {
+    OFS_t * ofs;
+    OFSFile_t * dir;
+    OFSDentry_t * dentry;
+    void * buf;
+    fuse_fill_dir_t filler;
+} DirIteratorTools;
+
+bool _ofsReadDirIterator( OFSDentry_t * dent, DirIteratorTools * dt ) {
+    if ( dent->file_flags == OFS_FLAG_FREE )
+        return true;
+
+    if ( dent->file_flags & ( OFS_FLAG_HIDDEN | OFS_FLAG_INVALID ) )
+        return true;
+
+    char * name;
+
+    name = calloc( dent->file_name_size + 1, sizeof( uint8_t ) );
+
+    memcpy(name, dent->file_name, dent->file_name_size);
+    dt->filler( dt->buf, name, NULL, 0, 0 );
+    free( name );
+
+    return true;
+}
+
+int ofs_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
+
+    OFS_t * ofs     = NULL;
     OFSFile_t * dir = NULL;
     int errcode;
 
     ofs = fuse_get_context();
     dir = ofsGetPathFile(ofs, path);
-
-    printf("[[ NOME ]] %p\n", dir->name);
 
     if ( ! dir )
         cleanup_errno(ENOENT);
@@ -88,16 +108,24 @@ int of_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offs
     filler( buf, ".", NULL, 0, 0 );
     filler( buf, "..", NULL, 0, 0 );
 
+    DirIteratorTools dt;
+
+    dt.buf = buf;
+    dt.dentry = NULL;
+    dt.filler = filler;
+    dt.dir = dir;
+    dt.ofs = ofs;
+
+    ofsDirectoryIterator(ofs, dir, _ofsReadDirIterator, &dt);
+
+
     if ( dir != ofs->root_dir )
         ofsCloseFile(dir);
     
-    notifyMessage(logger, "READDIR %s\n", path);
 
     return 0;
 
 cleanup:
-
-    notifyError(logger, "ERRORE readdir %s\n", path );
 
     if ( dir )
         if ( dir != ofs->root_dir )

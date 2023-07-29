@@ -2,6 +2,7 @@
 SRC_PATH := src/
 SRC_PATH += src/ofs/
 SRC_PATH += src/utils/
+SRC_PATH += src/hooks/
 
 
 MAIN_SRC := $(foreach path, $(SRC_PATH), $(wildcard $(path)*.c) )

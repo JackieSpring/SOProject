@@ -110,3 +110,9 @@ void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t f
 
 
 OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path );
+
+
+typedef bool (* directory_iterator) ( OFSDentry_t * dentry, void * extra );
+
+
+int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callback, void * extra );
