@@ -102,3 +102,11 @@ void ofsCloseFile( OFSFile_t * file );
 OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
 void ofsFreeDentry( OFSDentry_t * dent );
 
+
+// TODO GESTIRE AGGIUNTA/RIMOZIONE DI CLUSTER
+
+int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent );
+void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
+
+
+OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path );

@@ -2,45 +2,14 @@
 #include "devicehndl.h"
 
 
-/*  
-static ssize_t _pwrapper( ssize_t (* funptr)( int, char *, size_t ), int fd, char * buf, size_t size, off_t off ) {
-    off_t ofp;
-    int ret;
-
-    ofp = lseek( fd, 0, SEEK_CUR );
-    if ( ofp < 0 )
-        return -1;
-    
-    if( lseek( fd, off, SEEK_SET ) < 0 )
-        return -1;
-
-    ret = funptr( fd, buf, size );
-    
-    if ( lseek( fd, ofp, SEEK_SET ) < 0 )
-        return -1;
-
-    return ret;
-}
-
-#ifndef puts
-#error "errno undefined"
-#endif
-
-#ifndef pread
-#error "pread not defined"
-ssize_t pread( int fd, char * buf, size_t size, off_t off ) {
-    return _pwrapper( read, fd, buf, size, off );
-}
-#endif
-#ifndef pwrite
-ssize_t pwrite( int fd, char * buf, size_t size, off_t off ) {
-    return _pwrapper( write, fd, buf, size, off );
-}
-#endif
-*/
 
 struct DeviceStruct;
 
+
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!
+// le stat di un file non descrivono il device sottostante
+// pertanto bisogna trovare un altro modo per ottenere la 
+// block size
 
 DEVICE * openDev( char * path ) {
     DEVICE * ret;

@@ -1,7 +1,10 @@
 
 #include "ofsModel.h"
 #include "ofsStructures.h"
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 
 
 
@@ -89,6 +92,11 @@ void ofsClose( OFS_t * ofs ){
 }
 
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  CLUSTER OPS
+//
+
 OFSCluster_t * ofsGetCluster( OFS_t * ofs, OFSPtr_t ptr ) {
 
     if ( ptr == OFS_RESERVED_CLUSTER || ptr == OFS_INVALID_CLUSTER )
@@ -106,7 +114,6 @@ OFSCluster_t * ofsGetCluster( OFS_t * ofs, OFSPtr_t ptr ) {
     cls->cls_number = ptr;
     cls->next = ofs->fat[ptr];
     cls->size = ofs->cls_bytes;
-
 
     cls->data = mmap( NULL, ofs->cls_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, ofs->dev->dd, ofsSectorToByte( ofs->boot, clsStartSec ) - ovf );
     if ( cls->data == MAP_FAILED )
@@ -128,11 +135,16 @@ cleanup:
 void ofsFreeCluster( OFSCluster_t * cls ) {
     if ( cls ) {
         off_t ovf = (off_t)cls->data & (off_t)MASK_SYS_PAGE_SIZE ;
+        munmap(( (uint8_t *) cls) - ovf, cls->size);
         free( cls );
     }
 }
 
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  FILE OPS
+//
 
 OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
 
@@ -199,6 +211,10 @@ void ofsCloseFile( OFSFile_t * file ) {
 }
 
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  DENTRY OPS
+//
+
 
 OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize ) {
 
@@ -230,14 +246,21 @@ OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, si
     // al successivo
 
     for ( OFSPtr_t i = 0; (i < ptrList->size) && (flagFound == false) ; i++ ){
+        
         cls = ofsGetCluster(ofs, getItem(ptrList, i) );
+
         if ( cls == NULL )
             goto cleanup;
 
         dentryList = ( OFSDentry_t * ) cls->data;
 
-        for ( uint64_t i = 0; i < (cls->size / sizeof(OFSDentry_t) ); i++ ){
-            sample = &dentryList[0];
+        for ( uint64_t j = 0; j < (cls->size / sizeof(OFSDentry_t) ); j++ ){
+
+            sample = &dentryList[j];
+
+            if ( sample->file_flags == OFS_FLAG_FREE )
+                continue;
+
 
             if (( fnsize != sample->file_name_size ) ||                                // Stessa lunghezza
                 ( strncmp(fname, sample->file_name, sample->file_name_size) != 0 ) ||  // stessi caratteri
@@ -255,6 +278,9 @@ OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, si
         ofsFreeCluster(cls);
     }
 
+    if ( flagFound == false )
+        goto cleanup;
+
     return ret;
 
 cleanup:
@@ -266,6 +292,122 @@ cleanup:
 }
 
 
+int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent ) {
+
+    if ( ! ( ofs && file && dent ) )
+        return -1;
+
+    if ( file->flags & OFS_FLAG_INVALID )
+        return -1;
+
+    if ( ! (file->flags & OFS_FLAG_DIR) )
+        return -1;
+
+    OFSCluster_t * cls;
+    OFSDentry_t * sample;
+    OFSDentry_t * dlist;
+    OFSPtrList_t * plist;
+    bool flagFound;
+
+    plist = file->cls_list;
+    flagFound = false;
+
+    for ( OFSPtr_t i = 0; (i < plist->size) && (flagFound == false) ; i++ ){
+        cls = ofsGetCluster(ofs, getItem(plist, i) );
+        if ( cls == NULL )
+            goto cleanup;
+
+        dlist = ( OFSDentry_t * ) cls->data;
+
+        for ( uint64_t i = 0; i < (cls->size / sizeof(OFSDentry_t) ); i++ ){
+            sample = &dlist[i];
+
+            if ( OFS_FLAG_FREE != sample->file_flags )
+                continue;
+
+            flagFound = true;
+            memcpy( sample, dent, sizeof(OFSDentry_t));
+
+            break;
+        }
+
+        ofsFreeCluster(cls);
+    }
+
+    if ( flagFound == false )
+        goto cleanup;
+
+    return 0;
+
+cleanup:
+    return -1;
+}
+
+
+void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize ) {
+
+    if ( ! ( ofs && dir ) )
+        return;
+
+    if ( dir->flags & OFS_FLAG_INVALID )
+        return;
+
+    if ( ! (dir->flags & OFS_FLAG_DIR) )
+        return;
+
+    OFSCluster_t * cls;
+    OFSDentry_t * sample;
+    OFSDentry_t * dentryList;
+    OFSPtrList_t * ptrList;
+    bool flagFound = false;
+
+    ptrList = dir->cls_list;
+
+
+    // Esplora ogni cluster della directory come array di Dentry
+    // confronta il nome di ogni dentry con il nome cercato
+    // al termine dell'esplorazione libera il cluster e passa
+    // al successivo
+
+    for ( OFSPtr_t i = 0; (i < ptrList->size) && (flagFound == false) ; i++ ){
+        cls = ofsGetCluster(ofs, getItem(ptrList, i) );
+
+        if ( cls == NULL )
+            goto cleanup;
+
+        dentryList = ( OFSDentry_t * ) cls->data;
+
+        for ( uint64_t i = 0; i < (cls->size / sizeof(OFSDentry_t) ); i++ ){
+            sample = &dentryList[i];
+        
+            if ( sample->file_flags == OFS_FLAG_FREE )
+                continue;
+
+            if (( fnsize != sample->file_name_size ) ||                                // Stessa lunghezza
+                ( strncmp(fname, sample->file_name, sample->file_name_size) != 0 ) ||  // stessi caratteri
+                ( sample->file_flags & OFS_FLAG_INVALID )                              // non invalid
+            )
+                continue;
+
+            flagFound = true;
+
+            OFSDentry_t zeros = {0};
+            memcpy( sample, &zeros, sizeof(OFSDentry_t));
+
+            break;
+        }
+
+        ofsFreeCluster(cls);
+    }
+
+    if ( flagFound == false )
+        goto cleanup;
+
+cleanup:
+    return;
+}
+
+
 void ofsFreeDentry( OFSDentry_t * dent ) {
     if ( ! dent )
         return;
@@ -273,3 +415,64 @@ void ofsFreeDentry( OFSDentry_t * dent ) {
     free( dent );
 }
 
+
+OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path ) {
+
+    if ( ! ( path && ofs ) )
+        return NULL;
+
+    OFSFile_t * ret = NULL;
+    OFSDentry_t * link = NULL;
+    size_t arr_len = 0;
+    char ** path_arr = NULL;
+
+    if ( path[0] != '/' )
+        goto cleanup;
+
+    path += 1;  // ignora root
+
+    path_arr = tokenize(path, '/');
+
+    if ( path_arr == NULL )
+        goto cleanup;
+
+    for ( ; path_arr[arr_len] != NULL ; arr_len++ ) ;
+
+    ret = ofs->root_dir;
+
+    for ( size_t i = 0 ; i < arr_len ; i++ ) {
+
+        // controlla che il nodo corrente sia una directory
+        if ( ! ( ret->flags & OFS_FLAG_DIR ) )
+            goto cleanup;
+
+        link = ofsGetDentry(ofs, ret, path_arr[i], strlen(path_arr[i]));
+
+        if ( link == NULL )
+            goto cleanup;
+
+        if ( ret != ofs->root_dir )
+            ofsCloseFile(ret);
+        
+        // apre il file e libera le risorse
+        ret = ofsOpenFile(ofs, link);
+        ofsFreeDentry(link);
+    }
+
+    free_str_arr(path_arr);
+
+    return ret;
+
+cleanup:
+
+    if ( ret && ret != ofs->root_dir )
+        ofsCloseFile(ret);
+
+    if ( link )
+        ofsFreeDentry(link);
+
+    if ( path_arr )
+        free_str_arr(path_arr);
+
+    return NULL;
+}

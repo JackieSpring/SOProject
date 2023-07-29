@@ -1,4 +1,6 @@
 
+#include <sys/fcntl.h>
+#include <sys/stat.h>
 #define FUSE_USE_VERSION 31
 
 #include <fuse3/fuse.h>
@@ -8,6 +10,9 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <assert.h>
+#include <unistd.h>
+#include <sys/errno.h>
+
 
 #include "utils/generic.h"
 #include "utils/devicehndl.h"
@@ -15,6 +20,9 @@
 #include "ofs/ofsStructures.h"
 #include "ofs/ofsModel.h"
 #include "ofs/ofsListType.h"
+#include "hooks/directories.h"
+
+
 
 
 #ifndef bool
@@ -24,11 +32,10 @@
 #define DEV_DEFAULT "/tmp/sdo0"
 
 #define OPTION(t, p)    { t, offsetof(struct options, p), 1 }
-#define cleanup_escape( log, msg ) do{ notifyError(log, msg); goto cleanup; }while(0)
 
 
 DEVICE * dev;
-Logger * log;
+Logger * logger;
 
 static struct options {
     const char * device;
@@ -69,22 +76,13 @@ rename      // rinomina file
 */
 
 
-static void * of_init( struct fuse_conn_info * fi, struct fuse_config * cfg ) {
-    return NULL;
+//static void * of_init()
+
+static void of_destroy( void * private_data ) {
+    OFS_t * ofs = private_data;
+    ofsClose(ofs);
 }
 
-static int of_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi) {
-    memset( stbuf, 0, sizeof( struct stat ) );
-    stbuf->st_mode = S_IFDIR | 777 ;
-    stbuf->st_nlink = 1;
-    return 0;
-}
-
-static int of_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
-    filler( buf, ".", NULL, 0, 0 );
-    filler( buf, "..", NULL, 0, 0 );
-    return 0;
-}
 
 static int of_open( const char * path, struct fuse_file_info * fi ) {
     return 0;
@@ -97,6 +95,8 @@ static int of_read( const char * path, char * buff, size_t size, off_t offset, s
 static int of_write( const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info * fi ) {
     return 0;
 }
+
+
 
 static void show_help(const char * progname) {
 	printf("usage: %s [options] <mountpoint>\n\n", progname);
@@ -111,9 +111,11 @@ static void show_help(const char * progname) {
 
 
 static const struct fuse_operations of_ops = {
-    .init       = of_init,
-    .readdir    = of_readdir,
-    .getattr    = of_getattr,
+    .init       = NULL,//of_init,
+    .destroy    = of_destroy,
+
+    .readdir    = ofs_readdir,
+    .getattr    = ofs_getattr,
 };
 
 
@@ -121,6 +123,8 @@ int main(int argc , char * argv[]) {
 
     int ret ;
     struct fuse_args args = FUSE_ARGS_INIT( argc, argv );
+
+
 
     // Interprete argomenti
 
@@ -137,103 +141,79 @@ int main(int argc , char * argv[]) {
 		args.argv[0][0] = '\0';
 	}
 
+
+
+
+
+
     // Apertura del logger
 
     FILE * logfile = NULL;
     if ( options.logfile )
         logfile = fopen( options.logfile, "a" );
     
-    log = newLogger(logfile);
-
-    notifyMessage(log, "%s", "ciao");
-
-    printf( "dev: %s\n", options.device );
+    logger = newLogger(logfile);
 
     fflush(stdout);
 
+
     // Apertura device
 
-    //if ( access( options.device, R_OK | W_OK ) < 0 )
-    //    cleanup_escape( log, "Device read/write not allowed" );
-    
+    if ( access( options.device, F_OK ) ) { // Se non esiste
+
+        struct stat s;
+        int ret;
+
+        if( (ret = open(options.device, O_CREAT ) ) < 0 )    // crea
+            cleanup_escape( logger, "Something went wrong while trying to open the device" );
+
+        close(ret);
+        
+        if ( stat(options.device, &s) )         // misura
+            cleanup_escape( logger, "Something went wrong while trying to open the device" );
+
+        if ( s.st_size < MiB(25) ) 
+            if ( truncate(options.device, MiB(25)) )    // ridimensiona
+                cleanup_escape( logger, "Something went wrong while trying to open the device" );
+    }
+
     dev = openDev( options.device );
     if ( dev == NULL ) {
         if ( errno == EACCES )
-            cleanup_escape( log, "Device access not allowed" );
+            cleanup_escape( logger, "Device access not allowed" );
         else 
-            cleanup_escape( log, "Something went wrong while trying to open the device" );
+            cleanup_escape( logger, "Something went wrong while trying to open the device" );
     }
 
+    
+    // Formattazione
+
     if ( ofsIsDeviceFormatted(dev) )
-        notifyMessage(log, "Il device è gia stato formattato");
+        notifyMessage(logger, "Il device è gia stato formattato");
     else {
-        notifyMessage( log, "Il device deve essere formattao" );
+        notifyMessage( logger, "Il device deve essere formattao" );
 
         if ( ofsFormatDevice(dev) )
-            notifyError( log, "Errore durante la formattazione del device");
+            notifyError( logger, "Errore durante la formattazione del device");
     }
     printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
 
     OFS_t * ofs = ofsOpen( dev );
-    if ( ! ofs )
+    if ( ! ofs ){
         perror("OFS non è stato aperto");
-
-    printf( "boot: %p\n", ofs->boot );
-    printf( "fat: %p\n", ofs->fat);
-    printf( "fat size: %p\n", ofs->fat_size);
-
-
-    OFSCluster_t * cls = ofsGetCluster(ofs, ofs->boot->free_ptr);
-
-    if ( cls == NULL ){
-        perror("get cluster");
-        return 0;
+        notifyError(logger, "errore durante l'apertura del file system");
+        goto cleanup;
     }
 
-    printf( "n: %lu\n", cls->cls_number );
-    printf( "next: %lu\n", cls->next);
-    printf( "size: %lu\n", cls->size );
-    printf( "data: %p\n", cls->data );
 
-    ofsFreeCluster(cls);
 
-    OFSPtrList_t * list = createList(ofs->fat, ofs->boot->root_dir_ptr);
+    // DEBUGGGGGG
 
-    assert( list != NULL );
+    //return 0;
 
-    printf( "size: %lu\n", list->size );
-    printf( "head: %lu\n", list->head );
-    printf( "tail: %lu\n", list->tail );
-    printf( "zero: %lu\n\n", getItem(list, 0) );
+    // DEBUGGGGG
 
-    appendItem(list, 3);
-
-    printf( "size: %lu\n", list->size );
-    printf( "head: %lu\n", list->head );
-    printf( "tail: %lu\n", list->tail );
-    printf( "zero: %lu\n\n", getItem(list, 0) );
-
-    popItem( list );
-    popItem( list );
-
-    printf( "size: %lu\n", list->size );
-    printf( "head: %lu\n", list->head );
-    printf( "tail: %lu\n", list->tail );
-    printf( "zero: %lu\n\n", getItem(list, 0) );
-
-    ofsClose( ofs );
-
-    printf( "fname: %lu\n", sizeof( OFSDentry_t ) );
-
-    
-
-// DEBUGGGGGG
-
-    return 0;
-
-// DEBUGGGGG
-
-	ret = fuse_main(args.argc, args.argv, &of_ops, NULL);
+	ret = fuse_main(args.argc, args.argv, &of_ops, ofs);
 	fuse_opt_free_args(&args);
     //closeLogger(log);
 	return ret;

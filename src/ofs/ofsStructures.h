@@ -20,6 +20,7 @@
 #define OFS_FIRST_DATA_CLUSTER 2
 
 
+#define OFS_FLAG_FREE       0
 #define OFS_FLAG_DIR        1 << 0
 #define OFS_FLAG_FILE       1 << 1
 #define OFS_FLAG_RDONLY     1 << 2

@@ -1,5 +1,6 @@
 
 #include "logger.h"
+#include <stdio.h>
 
 #define LOG_MSG_STR "( MSG ) "
 #define LOG_ERR_STR "[ ERR ] "
@@ -39,6 +40,7 @@ int _notify( Logger * log, char * prefix, char * fmt, va_list args ) {
     full_fmt[ full_len - 2 ] = '\n';
 
     int ret = vfprintf( log->file, full_fmt, args );
+    fflush(log->file);
 
     return ret;
 }
