@@ -109,6 +109,7 @@ static const struct fuse_operations of_ops = {
 
     .getattr    = ofs_getattr,
     .access     = ofs_access,
+    .rename     = ofs_rename,
 
     .opendir    = ofs_opendir,
     .releasedir = ofs_releasedir,

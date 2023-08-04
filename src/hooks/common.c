@@ -86,3 +86,101 @@ cleanup:
 }
 
 
+// Opero come se RENAME_NOREPLACE fosse sempre impostata
+int ofs_rename (const char * src, const char * dst, unsigned int flags) {
+
+    struct fuse_context * fc = fuse_get_context();
+    OFS_t * ofs = fc->private_data;
+    OFSDir_t    * srcDir    = NULL;
+    OFSDir_t    * dstDir    = NULL;
+    OFSDentry_t * oldDent   = NULL;
+    OFSDentry_t * newDent   = NULL;
+    char * oldName          = NULL;
+    char * newName          = NULL;
+    char * oldPath          = NULL;
+    char * newPath          = NULL;
+    int errcode = 0;
+
+
+    dstDir = ofsGetPathFile(ofs, dst);
+    if ( dstDir != NULL )
+        cleanup_errno(EEXIST);
+
+    oldName = &src[ strlen(src) - 1 ];
+    newName = &dst[ strlen(dst) - 1 ];
+
+    for ( ; *oldName != '/' ; oldName-- );
+    for ( ; *newName != '/' ; newName-- );
+        
+    oldName++;
+    newName++;
+
+    if (! strcmp( oldName, "." ) ||
+        ! strcmp( newName, "." ) ||
+        ! strcmp( oldName, ".." ) ||
+        ! strcmp( newName, ".." )
+        )
+        cleanup_errno(EINVAL);
+
+    if ( strlen( oldName ) > OFS_FILENAME_SAMPLE_SIZE )
+        cleanup_errno(ENAMETOOLONG);
+
+    oldPath = strndup( src,  ((void *)oldName) - ((void *)src) );
+    newPath = strndup( dst,  ((void *)newName) - ((void *)dst) );
+
+    srcDir = ofsGetPathFile(ofs, oldPath);
+    dstDir = ofsGetPathFile(ofs, newPath);
+
+    if ( ! ( srcDir && dstDir ) )
+        cleanup_errno(ENOENT);
+
+    if ( ! ( srcDir->super.flags & OFS_FLAG_DIR ) )
+        cleanup_errno(ENOTDIR);
+
+    if ( ! ( dstDir->super.flags & OFS_FLAG_DIR ) )
+        cleanup_errno(ENOTDIR);
+
+    if ( srcDir->super.flags & OFS_FLAG_RDONLY )
+        cleanup_errno(EPERM);
+
+    if ( dstDir->super.flags & OFS_FLAG_RDONLY )
+        cleanup_errno(EPERM);
+
+    oldDent = ofsGetDentry(ofs, srcDir, oldName, strlen(oldName));
+    if ( ! oldDent )
+        cleanup_errno(ENOENT);
+
+    memcpy( oldDent->file_name, newName, strlen(newName) );
+    oldDent->file_name_size = strlen( newName );
+
+    if ( ofsInsertDentry(ofs, dstDir, oldDent) )
+        cleanup_errno(ENOSPC);
+
+    ofsDeleteDentry(ofs, srcDir, oldName, strlen(oldName));
+
+    ofsFreeDentry(oldDent);
+    ofsCloseFile(ofs, srcDir);
+    ofsCloseFile(ofs, dstDir);
+    free(oldPath);
+    free(newPath);
+
+    return 0;
+
+cleanup:
+
+    if ( dstDir )
+        ofsCloseFile(ofs, dstDir );
+
+    if ( srcDir )
+        ofsCloseFile(ofs, srcDir);
+
+    if ( oldPath )
+        free(oldPath);
+
+    if ( newPath )
+        free(newPath);
+
+    return -errcode;
+}
+
+

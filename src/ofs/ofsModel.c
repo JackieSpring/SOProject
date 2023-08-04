@@ -226,7 +226,6 @@ cleanup:
 
 void ofsFreeCluster( OFSCluster_t * cls ) {
     if ( cls ) {
-        printf( "FREE CLUSTER %p\n", cls );
         off_t ovf = (off_t)cls->data & (off_t)MASK_SYS_PAGE_SIZE ;
         munmap(( (uint8_t *) cls) - ovf, cls->size);
         free( cls );
