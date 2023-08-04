@@ -77,7 +77,7 @@ int ofsFormatDevice( DEVICE * dev ) {
 
     //DEBUG
     boot.sec_size = 512;
-    boot.sec_cnt = 50;
+    boot.sec_cnt = 150;
     //DEBUG
 
     boot.cls_size = ofsCalculateClusterSize( &boot );

@@ -30,4 +30,6 @@ int ofs_readdir(
         struct fuse_file_info *fi, 
         enum fuse_readdir_flags flags
     );
+int ofs_mkdir (const char *, mode_t);
+int ofs_rmdir(const char * path);
 

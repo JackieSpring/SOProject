@@ -13,6 +13,10 @@
 
 
 
+#define OFS_DIR_NO_ENTRIES -1
+
+
+
 typedef struct OFSFileStruct_t {
     OFSFileName_t * name;
     OFSFileNameSize_t name_size;
@@ -21,6 +25,12 @@ typedef struct OFSFileStruct_t {
     OFSFlags_t      flags;
     uint64_t        size;
 } OFSFile_t ;
+
+typedef struct OFSDirStruct_t {
+    OFSFile_t   super;
+    off_t    last_entry_index;
+    off_t    entries;
+} OFSDir_t;
 
 
 typedef struct OFSClusterStruct_t {
@@ -40,9 +50,14 @@ typedef struct OFSStruct_t {
     uint64_t    fat_size;   // Bytes
     uint64_t    cls_bytes;
 
+    off_t    cls_dentries;
+
     OFSFile_t * root_dir;
 } OFS_t;
 
+
+
+typedef bool (* directory_iterator) ( OFSDentry_t * dentry, void * extra );
 
 
 
@@ -96,23 +111,52 @@ OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry );
  *  Chiude l'handle del file e libera le sue risorse
  *  @param  file    handle del file
 */
-void ofsCloseFile( OFSFile_t * file );
+void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file );
 
-
+/**
+ *  Cerca una dentry a partire dal nome del file all'interno 
+ *  di una directory. Lo spazio per la dentry è allocato dalla
+ *  funzione stessa e dovrà essere liberato trmite ofsFreeDentry
+ *
+ *  @param  ofs
+ *  @param  dir     directory in cui cercare
+ *  @param  fname   stringa rappresentate il nome del file
+ *  @param  fnsize  dimensione del nome del file
+ *
+ *  @return     puntatore alla Dentry o NULL
+ *
+*/
 OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
 void ofsFreeDentry( OFSDentry_t * dent );
 
-
-// TODO GESTIRE AGGIUNTA/RIMOZIONE DI CLUSTER
-
+/**
+ *  Inserisce una dentry in una directory; la funzione non gestisce
+ *  i casi di duplicati. La nuova dentry sarà una copia della dentry 
+ *  passata tra gli argomenti.
+ *
+ *  @param  ofs 
+ *  @param  file    directory in cui inserire la dentry
+ *  @param  dent    dentry da inserire
+ *
+ *  @return     0 o -1 in caso di errore
+ *
+*/
 int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent );
 void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
 
-
+/**
+ *  Ottiene un file a partire dal percorso
+*/
 OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path );
 
-
-typedef bool (* directory_iterator) ( OFSDentry_t * dentry, void * extra );
-
-
+/**
+ *  Itera attraverso tutte le dentry di una directory
+*/
 int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callback, void * extra );
+
+
+
+
+int ofsExtendFile( OFS_t * ofs, OFSFile_t * file );
+int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file );
+

@@ -23,8 +23,11 @@
 #define SYS_PAGE_SIZE sys_page_size
 #define MASK_SYS_PAGE_SIZE mask_sys_page_size
 
+
 static long sys_page_size = 0;
 static long mask_sys_page_size = -1;
+static void * logger;
+
 
 static void __attribute__((constructor)) _initGlobalVars(){
     sys_page_size = sysconf( _SC_PAGESIZE );

@@ -27,7 +27,7 @@
 
 
 DEVICE * dev;
-Logger * logger;
+
 
 static struct options {
     const char * device;
@@ -108,6 +108,8 @@ static const struct fuse_operations of_ops = {
 
     .readdir    = ofs_readdir,
     .getattr    = ofs_getattr,
+    .mkdir      = ofs_mkdir,
+    .rmdir      = ofs_rmdir,
 };
 
 
@@ -190,6 +192,7 @@ int main(int argc , char * argv[]) {
     }
     printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
 
+
     OFS_t * ofs = ofsOpen( dev );
     if ( ! ofs ){
         perror("OFS non è stato aperto");
@@ -197,7 +200,7 @@ int main(int argc , char * argv[]) {
         goto cleanup;
     }
 
-
+    ofsDeleteDentry(ofs, ofs->root_dir, "2", 1);
 
     // DEBUGGGGGG
 
