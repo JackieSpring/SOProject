@@ -46,57 +46,48 @@ bool _ofsReadDirIterator( OFSDentry_t * dent, DirIteratorTools * dt ) {
 
 int ofs_opendir (const char * path, struct fuse_file_info * fi) {
 
-    return 0;
-}
-
-int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi) {
-
     struct fuse_context * fc = fuse_get_context();
     OFS_t * ofs = fc->private_data;
     OFSFile_t * file = NULL;
     int errcode = 0;
 
-    file = ofsGetPathFile(ofs, (char *) path);
 
+    file = ofsGetPathFile(ofs, path);
     if ( file == NULL )
         cleanup_errno(ENOENT);
 
+    if ( ! (file->flags & OFS_FLAG_DIR) )
+        cleanup_errno(ENOTDIR);
 
-    memset( stbuf, 0, sizeof( struct stat ) );
+    fi->fh = file->fhmem_idx;
 
-    stbuf->st_dev = ofs->dev->dstat.st_dev;
-    stbuf->st_uid = getuid();
-    stbuf->st_gid = getgid();
-
-    stbuf->st_mode  = S_IWUSR | S_IRUSR;
-    stbuf->st_nlink = 1;
-
-    stbuf->st_size      = file->size;
-    stbuf->st_blksize   = ofs->boot->sec_size;
-    stbuf->st_blocks    = (file->size / 512 );
-    if ( ! stbuf->st_blksize )
-        stbuf->st_blksize = 1;
-
-
-    if ( file->flags & OFS_FLAG_DIR )
-        stbuf->st_mode = S_IFDIR | S_IXUSR;
-
-    if ( file->flags & OFS_FLAG_FILE )
-        stbuf->st_mode = S_IFREG;
-
-    if ( file->flags & OFS_FLAG_RDONLY )
-        stbuf->st_mode &= S_IRUSR;
-
-
-    ofsCloseFile(ofs, file);
-
-    return errcode;
+    return 0;
 
 cleanup:
 
     if ( file )
         ofsCloseFile(ofs, file);
 
+    return -errcode;
+}
+
+int ofs_releasedir(const char * path, struct fuse_file_info * fi) {
+
+    struct fuse_context * fc = fuse_get_context();
+    OFS_t * ofs = fc->private_data;
+    OFSFile_t * file = NULL;
+    int errcode = 0;
+
+    if ( fi == NULL )
+        return 0;
+
+    file = ofsGetFileHandle(ofs, fi->fh);
+    if ( file == NULL )
+        cleanup_errno(EBADF);
+    
+    ofsCloseFile(ofs, file);
+
+cleanup:
     return -errcode;
 }
 
@@ -109,7 +100,8 @@ int ofs_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t off
 
     fc = fuse_get_context();
     ofs = fc->private_data;
-    dir = ofsGetPathFile(ofs, path);
+    //dir = ofsGetPathFile(ofs, path);
+    dir = ofsGetFileHandle(ofs, fi->fh);
 
     if ( ! dir )
         cleanup_errno(ENOENT);
@@ -129,15 +121,15 @@ int ofs_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t off
         cleanup_errno(EIO);
 
 
-    ofsCloseFile(ofs, dir);
+    //ofsCloseFile(ofs, dir);
     
 
     return 0;
 
 cleanup:
 
-    if ( dir )
-        ofsCloseFile(ofs, dir);
+    //if ( dir )
+    //    ofsCloseFile(ofs, dir);
 
     return -errcode;
 

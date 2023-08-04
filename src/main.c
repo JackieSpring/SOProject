@@ -19,6 +19,7 @@
 #include "ofs/ofsModel.h"
 #include "ofs/ofsListType.h"
 #include "hooks/directories.h"
+#include "hooks/common.h"
 
 
 #define DEV_DEFAULT "/tmp/sdo0"
@@ -106,8 +107,13 @@ static const struct fuse_operations of_ops = {
     .init       = NULL,//of_init,
     .destroy    = of_destroy,
 
-    .readdir    = ofs_readdir,
     .getattr    = ofs_getattr,
+    .access     = ofs_access,
+
+    .opendir    = ofs_opendir,
+    .releasedir = ofs_releasedir,
+
+    .readdir    = ofs_readdir,
     .mkdir      = ofs_mkdir,
     .rmdir      = ofs_rmdir,
 };
@@ -200,7 +206,22 @@ int main(int argc , char * argv[]) {
         goto cleanup;
     }
 
-    ofsDeleteDentry(ofs, ofs->root_dir, "2", 1);
+    printf( "root idx: %lu\n", ofs->root_dir->fhmem_idx );
+
+    OFSDentry_t d = {
+        .file_name = 0x6f,
+        .file_name_size = 1,
+        .file_first_cls = 0x19,
+        .file_flags = OFS_FLAG_DIR,
+    };
+    OFSFile_t * f = ofsOpenFile(ofs, &d);
+
+    printf("f idx: %lu\n", f->fhmem_idx);
+
+    ofsCloseFile(ofs, f);
+
+    printf( "ofs.btm: %lu\n", ofs->fhmem_bottom );
+    printf( "ofs.last: %lu\n", ofs->fhmem_free);
 
     // DEBUGGGGGG
 

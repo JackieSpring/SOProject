@@ -19,10 +19,5 @@
 #include "../ofs/ofsModel.h"
 #include "../ofs/ofsStructures.h"
 
-
-int ofs_opendir (const char * path, struct fuse_file_info * fi);
-int ofs_releasedir(const char * path, struct fuse_file_info * fi);
-int ofs_readdir( const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags );
-int ofs_mkdir (const char *, mode_t);
-int ofs_rmdir(const char * path);
-
+int ofs_access (const char * path, int req);
+int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi);

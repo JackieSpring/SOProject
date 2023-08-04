@@ -14,6 +14,8 @@
 
 
 #define OFS_DIR_NO_ENTRIES -1
+#define OFS_FHMEM_LAST  -1
+#define OFS_FHMEM_INIT_SIZE 0x10
 
 
 
@@ -24,6 +26,7 @@ typedef struct OFSFileStruct_t {
     OFSPtr_t        parent_dir;
     OFSFlags_t      flags;
     uint64_t        size;
+    off_t           fhmem_idx;
 } OFSFile_t ;
 
 typedef struct OFSDirStruct_t {
@@ -53,6 +56,11 @@ typedef struct OFSStruct_t {
     off_t    cls_dentries;
 
     OFSFile_t * root_dir;
+
+    off_t       fhmem_bottom;
+    off_t       fhmem_free;
+    off_t       fhmem_size;
+    OFSFile_t ** fhmem;
 } OFS_t;
 
 
@@ -160,3 +168,6 @@ int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callb
 int ofsExtendFile( OFS_t * ofs, OFSFile_t * file );
 int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file );
 
+
+
+OFSFile_t * ofsGetFileHandle( OFS_t * ofs, off_t idx );

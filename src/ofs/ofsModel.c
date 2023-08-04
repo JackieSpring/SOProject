@@ -7,7 +7,12 @@ OFS_t * ofsOpen( DEVICE * dev ) {
     if ( dev == NULL )
         goto cleanup;
 
-    OFS_t * ofs = NULL;
+
+    OFS_t * ofs         = NULL;
+    OFSBoot_t * boot    = MAP_FAILED;
+    OFSFile_t ** fhmem   = NULL;
+
+
 
     ofs = (OFS_t *) calloc( 1, sizeof(OFS_t) );
     if ( ofs == NULL )
@@ -22,9 +27,10 @@ OFS_t * ofsOpen( DEVICE * dev ) {
     // Mappa in memoria l'intero boot sector del file system
     // in modo da potervi facilemnte accedere come struttura
 
-    ofs->boot = mmap( NULL, sizeof(OFSBoot_t), PROT_READ | PROT_WRITE, MAP_SHARED, dev->dd, 0 );
-    if ( ofs->boot == MAP_FAILED )
+    boot = mmap( NULL, sizeof(OFSBoot_t), PROT_READ | PROT_WRITE, MAP_SHARED, dev->dd, 0 );
+    if ( boot == MAP_FAILED )
         goto cleanup;
+    ofs->boot = boot;
 
     // Mappa in memoria la tabella FAT, poiché i settori mappati
     // essere allineati con le pagine di memoria e le dimensioni
@@ -36,19 +42,32 @@ OFS_t * ofsOpen( DEVICE * dev ) {
     OFSSec_t fatEnd = ofs->boot->first_sec;
     OFSSecSize_t secSize = ofs->boot->sec_size;
     off_t ovf;
-    uint8_t * fptr;
+    uint8_t * fptr  = MAP_FAILED;
+    uint64_t fat_size = (fatEnd - fatStart) * secSize;
 
-    ofs->fat_size = (fatEnd - fatStart) * secSize;
     ovf = (fatStart * secSize) % SYS_PAGE_SIZE;
 
-    fptr = mmap( NULL, ofs->fat_size, PROT_READ | PROT_WRITE, MAP_SHARED, dev->dd, (fatStart * secSize) - ovf );
+    fptr = mmap( NULL, fat_size, PROT_READ | PROT_WRITE, MAP_SHARED, dev->dd, (fatStart * secSize) - ovf );
     if ( fptr == MAP_FAILED )
         goto cleanup;
 
     ofs->fat = (OFSPtr_t *) (fptr + ovf);
+    ofs->fat_size = fat_size;
     ofs->cls_bytes = ofs->boot->sec_size * ofs->boot->cls_size;
     ofs->cls_dentries = ofs->cls_bytes / sizeof( OFSDentry_t );
 
+    // FHMEM
+
+    fhmem = calloc( OFS_FHMEM_INIT_SIZE, sizeof( OFSFile_t * ) );
+    if ( fhmem == NULL )
+        goto cleanup;
+    
+    ofs->fhmem          = fhmem;
+    ofs->fhmem_size     = OFS_FHMEM_INIT_SIZE;
+    ofs->fhmem_bottom   = 0;
+    ofs->fhmem_free     = OFS_FHMEM_LAST;
+
+    // ROOT DIRECTORY
     OFSDentry_t rootDentry = {
         .file_first_cls = ofs->boot->root_dir_ptr,
         .file_flags = OFS_FLAG_DIR,
@@ -69,11 +88,14 @@ cleanup:
     if ( ofs )
         free(ofs);
 
-    if ( ofs->boot != MAP_FAILED )
-        munmap( ofs->boot, sizeof(OFSBoot_t) );
+    if ( boot != MAP_FAILED )
+        munmap( boot, sizeof(OFSBoot_t) );
 
-    if ( ofs->fat != MAP_FAILED )
-        munmap( ofs->fat, ofs->fat_size );
+    if ( fptr != MAP_FAILED )
+        munmap( fptr, fat_size );
+
+    if ( fhmem )
+        free(fhmem);
 
     return NULL;
 }
@@ -87,6 +109,80 @@ void ofsClose( OFS_t * ofs ){
     return;
 }
 
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  FILE HANDLE MEMORY OPS
+//
+
+off_t ofsRegisterFileHandle( OFS_t * ofs, OFSFile_t * fh ) {
+    if ( ! ( ofs && fh ) )
+        return OFS_FHMEM_LAST;
+
+    off_t ret;
+    off_t fhmem_size;
+    off_t fhmem_free;
+    OFSFile_t ** fhmem;
+
+    fhmem = ofs->fhmem;
+    fhmem_size = ofs->fhmem_size;
+    fhmem_free = ofs->fhmem_free;
+
+    // Se lo spazio è esaurito espande l'array
+    if ( ofs->fhmem_bottom == OFS_FHMEM_LAST ) {
+        fhmem = realloc( ofs->fhmem, 2 * fhmem_size * sizeof( OFSFile_t * ) );
+        if ( fhmem == NULL )
+            goto cleanup;
+
+        ofs->fhmem = fhmem;
+        ofs->fhmem_size = 2 * fhmem_size;
+        ofs->fhmem_bottom = fhmem_size;
+        fhmem_size = 2 * fhmem_size;
+    }
+
+    // Se sono stati deallocati dei blocchi allora usali
+    if ( fhmem_free != OFS_FHMEM_LAST ) {
+        ofs->fhmem_free = fhmem[ fhmem_free ];
+        fhmem[ fhmem_free ] = fh;
+        ret = fhmem_free;
+    }
+    else {  // altrimenti metti in fondo
+        fhmem[ ofs->fhmem_bottom ] = fh;
+        ret = ofs->fhmem_bottom;
+        ofs->fhmem_bottom++;
+
+        if ( ofs->fhmem_bottom == ofs->fhmem_size )
+            ofs->fhmem_bottom = OFS_FHMEM_LAST;
+    }
+
+    return ret;
+
+cleanup:
+    return OFS_FHMEM_LAST;
+}
+
+void ofsUnregisterFileHandle( OFS_t * ofs, off_t idx ) {
+    if ( ! ofs )
+        return;
+
+    if ( idx == OFS_FHMEM_LAST )
+        return;
+
+    ofs->fhmem[ idx ] = ofs->fhmem_free;
+    ofs->fhmem_free = idx;
+
+    return;
+}
+
+OFSFile_t * ofsGetFileHandle( OFS_t * ofs, off_t idx ) {
+    if ( ! ofs )
+        return NULL;
+
+    if ( idx == OFS_FHMEM_LAST )
+        return NULL;
+
+    return ofs->fhmem[ idx ];
+}
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -130,6 +226,7 @@ cleanup:
 
 void ofsFreeCluster( OFSCluster_t * cls ) {
     if ( cls ) {
+        printf( "FREE CLUSTER %p\n", cls );
         off_t ovf = (off_t)cls->data & (off_t)MASK_SYS_PAGE_SIZE ;
         munmap(( (uint8_t *) cls) - ovf, cls->size);
         free( cls );
@@ -153,6 +250,7 @@ OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
     OFSFile_t * ret;
     OFSFileName_t * name;
     OFSPtrList_t * clist;
+    off_t fhidx;
     unsigned long objSize = 0;
 
     if ( dentry->file_flags & OFS_FLAG_DIR )
@@ -176,11 +274,16 @@ OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
     if ( clist == NULL )
         goto cleanup;
 
+    fhidx = ofsRegisterFileHandle(ofs, ret);
+    if ( fhidx == OFS_FHMEM_LAST )
+        goto cleanup;
+
     ret->name = name;
     ret->cls_list = clist;
     ret->name_size = dentry->file_name_size;
     ret->flags = dentry->file_flags;
     ret->size = dentry->file_size;
+    ret->fhmem_idx = fhidx;
     ret->parent_dir = NULL; // TODO
 
     // Se directory, inizializza l'oggetto
@@ -230,6 +333,8 @@ void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file ) {
 
     if ( file == ofs->root_dir )
         return;
+
+    ofsUnregisterFileHandle(ofs, file->fhmem_idx);
 
     free( file->name );
     destroyList(file->cls_list);
