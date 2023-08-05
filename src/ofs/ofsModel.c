@@ -293,6 +293,9 @@ void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file ) {
     if ( file == ofs->root_dir )
         return;
 
+    if ( file->refs > 0 )
+        return;
+
     numHTRemove(ofs->fomem, file->fomem_key);
     destroyList(file->cls_list);
     free( file->name );

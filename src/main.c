@@ -121,6 +121,9 @@ static const struct fuse_operations of_ops = {
 
     .create     = ofs_create,
     .unlink     = ofs_unlink,
+
+    .open       = ofs_open,
+    .release    = ofs_release,
 };
 
 

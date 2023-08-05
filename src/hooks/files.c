@@ -2,6 +2,7 @@
 
 #include "files.h"
 #include <stddef.h>
+#include <sys/fcntl.h>
 
 
 
@@ -91,15 +92,13 @@ int ofs_create (const char * path, mode_t mode, struct fuse_file_info * fi ) {
 
     fi->fh = fh->fhmem_idx;
 
-
-    if ( dir->refs < 1 )
-        ofsCloseFile(ofs, dir);
+    ofsCloseFile(ofs, dir);
 
     return 0;
 
 cleanup:
 
-    if ( dir && dir->refs < 1 )
+    if ( dir )
         ofsCloseFile(ofs, dir);
 
     if ( copy )
@@ -166,27 +165,99 @@ int ofs_unlink (const char * path) {
 
     ofsDeleteDentry(ofs, dir, filename, strlen(filename));
     ofsDeallocClusters(ofs, dent->file_first_cls);
-
-    if ( dir->refs < 1 )
-        ofsCloseFile(ofs, dir);
+    ofsFreeDentry(dent);
+    ofsCloseFile(ofs, dir);
 
 
     return 0;
 
 cleanup:
 
-    if ( dir && dir->refs < 1 )
+    if ( dir )
         ofsCloseFile(ofs, dir);
 
     return -errcode;
 }
 
+
+
 int ofs_open (const char * path, struct fuse_file_info * fi) {
 
+    struct fuse_context * fc = fuse_get_context();
+    OFS_t * ofs = fc->private_data;
+    OFSFile_t * file        = NULL;
+    OFSFileHandle_t * fh    = NULL;
+    off_t seek              = 0;
+    int flagReq = fi->flags;
     int errcode = 0;
 
+
+    file = ofsGetPathFile(ofs, path);
+    if ( ! file )
+        cleanup_errno(ENOENT);
+
+    if ( file->flags & OFS_FLAG_DIR )
+        cleanup_errno(EISDIR);
+
+    if ( (flagReq & ( O_RDWR | O_WRONLY )) && (file->flags & OFS_FLAG_RDONLY) )
+        cleanup_errno(EACCES);
+
+
+    if ( flagReq & O_TRUNC ) { // Truncate size to 0
+        if ( file->cls_list->size > 1 )
+            ofsDeallocClusters(ofs, getItem(file->cls_list, 1));
+        
+        file->size = 0;
+    }
+
+    if ( flagReq & O_APPEND )   // imposta il cursore in fondo
+        seek = file->size;
+
+    fh = ofsOpenFileHandle(ofs, file);
+    if ( ! fh )
+        cleanup_errno(EIO);
+
+    fh->open_flags = flagReq;
+    fh->seek_ptr = seek;
+
+    fi->fh = fh->fhmem_idx;
+
+    return 0;
+
 cleanup:
+
+    if ( file )
+        ofsCloseFile(ofs, file);
+
     return -errcode;
 }
 
-int ofs_release (const char *, struct fuse_file_info *);
+int ofs_release (const char * path, struct fuse_file_info * fi) {
+
+    struct fuse_context * fc = fuse_get_context();
+    OFS_t * ofs = fc->private_data;
+    OFSFile_t * file        = NULL;
+    OFSFileHandle_t * fh    = NULL;
+    int errcode = 0;
+
+    fh = ofsGetFileHandle(ofs, fi->fh);
+    if ( ! fh )
+        cleanup_errno(EBADF);
+
+    file = ofsGetFile(ofs, fh->fomem_idx);
+    if ( ! file )
+        cleanup_errno(EBADF);
+
+    ofsCloseFileHandle(ofs, fh);
+    ofsCloseFile(ofs, file);
+
+    return 0;
+
+cleanup:
+
+    return -errcode;
+}
+
+
+int ofs_read (const char * path, char * buf, size_t size, off_t off, struct fuse_file_info * fi);
+int ofs_write (const char * path, const char * buf, size_t size, off_t off, struct fuse_file_info * fi);

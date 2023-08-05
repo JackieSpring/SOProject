@@ -64,13 +64,14 @@ int ofs_opendir (const char * path, struct fuse_file_info * fi) {
     if ( fileH == NULL )
         cleanup_errno(EIO);
     
+    fileH->open_flags = fi->flags;
     fi->fh = fileH->fhmem_idx;
 
     return 0;
 
 cleanup:
 
-    if ( file && file->refs < 1 )
+    if ( file )
         ofsCloseFile(ofs, file);
 
     return -errcode;
@@ -98,9 +99,7 @@ int ofs_releasedir(const char * path, struct fuse_file_info * fi) {
         cleanup_errno(EBADF);
     
     ofsCloseFileHandle(ofs, fileH);
-
-    if ( file->refs < 1 )
-        ofsCloseFile(ofs, file);
+    ofsCloseFile(ofs, file);
 
 cleanup:
     return -errcode;
@@ -220,8 +219,7 @@ int ofs_mkdir (const char * path, mode_t mode) {
     if ( ofsInsertDentry(ofs, dir, &dent) )
         cleanup_errno(EIO);
 
-    if ( dir->refs < 1 )
-        ofsCloseFile(ofs, dir);
+    ofsCloseFile(ofs, dir);
 
     return 0;
 
@@ -231,7 +229,7 @@ cleanup:
     if ( copy )
         free(copy);
 
-    if ( dir && dir->refs < 1 )
+    if ( dir )
         ofsCloseFile(ofs, dir);
 
     return -errcode;
@@ -306,9 +304,7 @@ int ofs_rmdir (const char * path) {
 
     ofsDeleteDentry(ofs, dir, filename, strlen(filename));
 
-    if ( file->refs < 1 )
-        ofsCloseFile(ofs, file);
-    
+    ofsCloseFile(ofs, file);
     ofsCloseFile(ofs, oldDir);
     ofsDeallocClusters(ofs, head);
     ofsFreeDentry(dentry);
@@ -320,7 +316,7 @@ cleanup:
     if ( copy )
         free(copy);
 
-    if ( file && file->refs < 1 )
+    if ( file )
         ofsCloseFile(ofs, file);
 
     if ( dentry )
