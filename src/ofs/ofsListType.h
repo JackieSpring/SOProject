@@ -3,6 +3,7 @@
 
 
 #include "ofsStructures.h"
+#include "../utils/numhashtable.h"
 
 
 typedef struct OFSPtrListStruct_t {

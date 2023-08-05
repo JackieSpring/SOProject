@@ -81,9 +81,9 @@ cleanup:
     return OFS_INVALID_CLUSTER;
 }
 
-//
-// RIVEDERE la manipolazione della FAT da parte delle liste
-//
+
+// Ritorna l'elemento precedente a quello inserito 
+// TODO MEMORY LEAK
 OFSPtr_t appendItem( OFSPtrList_t * list , OFSPtr_t item ) {
     if ( ! list )
         goto cleanup;

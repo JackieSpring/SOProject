@@ -20,9 +20,11 @@ char ** tokenize( const char * str, char c ) {
     size_t i;
 
     s = str;
-    copy = strdup(str);
+    copy = calloc( strlen(str), sizeof(char) ); //strdup(str);
     if ( ! copy )
         goto cleanup;
+    memcpy(copy, str, strlen(str));
+    
     
     for (i=1; s[i]; s[i]== c ? i++ : *s++); // stima il numero di token, sempre almeno uno
 

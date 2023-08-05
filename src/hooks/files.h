@@ -20,6 +20,9 @@
 #include "../ofs/ofsStructures.h"
 
 
+int ofs_create (const char *, mode_t, struct fuse_file_info *);
+int ofs_unlink (const char *);
+
 int ofs_open (const char *, struct fuse_file_info *);
 int ofs_release (const char *, struct fuse_file_info *);
 int ofs_read (const char *, char *, size_t, off_t, struct fuse_file_info *);

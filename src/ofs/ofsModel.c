@@ -10,7 +10,8 @@ OFS_t * ofsOpen( DEVICE * dev ) {
 
     OFS_t * ofs         = NULL;
     OFSBoot_t * boot    = MAP_FAILED;
-    OFSFile_t ** fhmem   = NULL;
+    Array_t * fhmem     = NULL;
+    NumHT_t * fomem     = NULL;
 
 
 
@@ -58,14 +59,20 @@ OFS_t * ofsOpen( DEVICE * dev ) {
 
     // FHMEM
 
-    fhmem = calloc( OFS_FHMEM_INIT_SIZE, sizeof( OFSFile_t * ) );
-    if ( fhmem == NULL )
+    fhmem = arrayCreate(OFS_FHMEM_INIT_SIZE);
+    if ( ! fhmem )
         goto cleanup;
-    
-    ofs->fhmem          = fhmem;
-    ofs->fhmem_size     = OFS_FHMEM_INIT_SIZE;
-    ofs->fhmem_bottom   = 0;
-    ofs->fhmem_free     = OFS_FHMEM_LAST;
+
+    ofs->fhmem = fhmem;
+
+    // FOMEM
+
+    fomem = numHTCreate();
+    if ( ! fomem )
+        goto cleanup;
+
+    ofs->fomem = fomem;
+
 
     // ROOT DIRECTORY
     OFSDentry_t rootDentry = {
@@ -95,13 +102,26 @@ cleanup:
         munmap( fptr, fat_size );
 
     if ( fhmem )
-        free(fhmem);
+        arrayDestroy(fhmem);
+
+    if ( fomem )
+        numHTDestroy(fomem);
 
     return NULL;
 }
 
 void ofsClose( OFS_t * ofs ){
 
+    if ( ! ofs)
+        return;
+
+    OFSFile_t * root = ofs->root_dir;
+
+    ofs->root_dir = NULL;
+
+    ofsCloseFile(ofs, root);
+    arrayDestroy(ofs->fhmem);
+    numHTDestroy(ofs->fomem);
     munmap( ofs->fat, ofs->fat_size );
     munmap( ofs->boot, sizeof(OFSBoot_t) );
     free(ofs);
@@ -111,78 +131,6 @@ void ofsClose( OFS_t * ofs ){
 
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//  FILE HANDLE MEMORY OPS
-//
-
-off_t ofsRegisterFileHandle( OFS_t * ofs, OFSFile_t * fh ) {
-    if ( ! ( ofs && fh ) )
-        return OFS_FHMEM_LAST;
-
-    off_t ret;
-    off_t fhmem_size;
-    off_t fhmem_free;
-    OFSFile_t ** fhmem;
-
-    fhmem = ofs->fhmem;
-    fhmem_size = ofs->fhmem_size;
-    fhmem_free = ofs->fhmem_free;
-
-    // Se lo spazio è esaurito espande l'array
-    if ( ofs->fhmem_bottom == OFS_FHMEM_LAST ) {
-        fhmem = realloc( ofs->fhmem, 2 * fhmem_size * sizeof( OFSFile_t * ) );
-        if ( fhmem == NULL )
-            goto cleanup;
-
-        ofs->fhmem = fhmem;
-        ofs->fhmem_size = 2 * fhmem_size;
-        ofs->fhmem_bottom = fhmem_size;
-        fhmem_size = 2 * fhmem_size;
-    }
-
-    // Se sono stati deallocati dei blocchi allora usali
-    if ( fhmem_free != OFS_FHMEM_LAST ) {
-        ofs->fhmem_free = fhmem[ fhmem_free ];
-        fhmem[ fhmem_free ] = fh;
-        ret = fhmem_free;
-    }
-    else {  // altrimenti metti in fondo
-        fhmem[ ofs->fhmem_bottom ] = fh;
-        ret = ofs->fhmem_bottom;
-        ofs->fhmem_bottom++;
-
-        if ( ofs->fhmem_bottom == ofs->fhmem_size )
-            ofs->fhmem_bottom = OFS_FHMEM_LAST;
-    }
-
-    return ret;
-
-cleanup:
-    return OFS_FHMEM_LAST;
-}
-
-void ofsUnregisterFileHandle( OFS_t * ofs, off_t idx ) {
-    if ( ! ofs )
-        return;
-
-    if ( idx == OFS_FHMEM_LAST )
-        return;
-
-    ofs->fhmem[ idx ] = ofs->fhmem_free;
-    ofs->fhmem_free = idx;
-
-    return;
-}
-
-OFSFile_t * ofsGetFileHandle( OFS_t * ofs, off_t idx ) {
-    if ( ! ofs )
-        return NULL;
-
-    if ( idx == OFS_FHMEM_LAST )
-        return NULL;
-
-    return ofs->fhmem[ idx ];
-}
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -199,7 +147,8 @@ OFSCluster_t * ofsGetCluster( OFS_t * ofs, OFSPtr_t ptr ) {
     off_t ovf = ofsSectorToByte( ofs->boot, clsStartSec ) & (off_t) MASK_SYS_PAGE_SIZE ;
 
 
-    cls = (OFSCluster_t * ) calloc( 1, sizeof(OFSCluster_t) );
+    //cls = (OFSCluster_t * ) calloc( 1, sizeof(OFSCluster_t) );
+    cls = malloc( sizeof( OFSCluster_t ) );
     if ( cls == NULL )
         return NULL;
 
@@ -227,7 +176,7 @@ cleanup:
 void ofsFreeCluster( OFSCluster_t * cls ) {
     if ( cls ) {
         off_t ovf = (off_t)cls->data & (off_t)MASK_SYS_PAGE_SIZE ;
-        munmap(( (uint8_t *) cls) - ovf, cls->size);
+        munmap(( (uint8_t *) cls->data) - ovf, cls->size);
         free( cls );
     }
 }
@@ -246,11 +195,17 @@ OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
     if ( dentry->file_flags & OFS_FLAG_INVALID )
         return NULL;
 
-    OFSFile_t * ret;
-    OFSFileName_t * name;
-    OFSPtrList_t * clist;
-    off_t fhidx;
-    unsigned long objSize = 0;
+    OFSFile_t * ret         = NULL;
+    OFSFileName_t * name    = NULL;
+    OFSPtrList_t * clist    = NULL;
+    NumHTKey_t fomem_key    = OFS_INVALID_CLUSTER;
+    unsigned long objSize   = 0;
+
+    if ( (ret = numHTGet(ofs->fomem, dentry->file_first_cls)) )
+        return ret;
+    else
+        ret = NULL;
+
 
     if ( dentry->file_flags & OFS_FLAG_DIR )
         objSize = sizeof( OFSDir_t );
@@ -273,17 +228,19 @@ OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
     if ( clist == NULL )
         goto cleanup;
 
-    fhidx = ofsRegisterFileHandle(ofs, ret);
-    if ( fhidx == OFS_FHMEM_LAST )
+
+    fomem_key = dentry->file_first_cls;
+    if ( numHTInsert(ofs->fomem, fomem_key, ret) )
         goto cleanup;
 
-    ret->name = name;
-    ret->cls_list = clist;
-    ret->name_size = dentry->file_name_size;
-    ret->flags = dentry->file_flags;
-    ret->size = dentry->file_size;
-    ret->fhmem_idx = fhidx;
-    ret->parent_dir = NULL; // TODO
+    ret->name       = name;
+    ret->cls_list   = clist;
+    ret->name_size  = dentry->file_name_size;
+    ret->flags      = dentry->file_flags;
+    ret->size       = dentry->file_size;
+    ret->fomem_key  = fomem_key;
+    ret->parent_dir = OFS_INVALID_CLUSTER; // TODO
+    ret->refs       = 0;
 
     // Se directory, inizializza l'oggetto
     if ( ret->flags & OFS_FLAG_DIR ) {
@@ -319,6 +276,9 @@ cleanup:
     if ( clist )
         destroyList(clist);
 
+    if ( fomem_key != OFS_INVALID_CLUSTER )
+        numHTRemove(ofs->fomem, fomem_key);
+
     if (ret)
         free(ret);
 
@@ -333,10 +293,9 @@ void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file ) {
     if ( file == ofs->root_dir )
         return;
 
-    ofsUnregisterFileHandle(ofs, file->fhmem_idx);
-
-    free( file->name );
+    numHTRemove(ofs->fomem, file->fomem_key);
     destroyList(file->cls_list);
+    free( file->name );
     free(file);
 
     return;
@@ -568,7 +527,7 @@ void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t f
 
     directory->entries--;
 
-    if ( directory->entries && (directory->last_entry_index == 0) ){
+    if ( directory->entries && (directory->last_entry_index == 0) ){ // Restringe il file solo se avanzano entry
         directory->last_entry_index = ofs->cls_dentries;
         ofsShrinkFile(ofs, dir);
     }else
@@ -708,43 +667,118 @@ cleanup:
 
 
 
+
+OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt ) {
+    if ( ! ( ofs && cnt ) )
+        return OFS_INVALID_CLUSTER;
+
+    OFSBoot_t * boot    = ofs->boot;
+    OFSPtr_t * fat      = ofs->fat;
+    OFSPtr_t freeHead;
+    OFSPtr_t last;
+
+    if ( boot->free_cls_cnt < cnt )
+        goto cleanup;
+
+    freeHead = boot->free_ptr;
+    last = freeHead;
+
+    for ( size_t i = 1 ; i < cnt ; i++, last = fat[last] );
+
+    boot->free_cls_cnt -= cnt;
+    boot->free_ptr = fat[last];
+    fat[last] = OFS_LAST_CLUSTER;
+
+    return freeHead;
+
+cleanup:
+    return OFS_INVALID_CLUSTER;
+}
+
+void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead ) {
+
+    if ( ! ofs )
+        return;
+
+    if (clsHead == OFS_INVALID_CLUSTER ||
+        clsHead == OFS_RESERVED_CLUSTER ||
+        clsHead == OFS_LAST_CLUSTER )
+        return;
+
+    OFSBoot_t * boot    = ofs->boot;
+    OFSPtr_t * fat      = ofs->fat;
+    OFSPtr_t freeHead;
+    OFSPtr_t last;
+    size_t clsCnt = 1;
+
+    freeHead = boot->free_ptr;
+    last = clsHead;
+
+    for (  ; fat[last] != OFS_LAST_CLUSTER ; clsCnt++, last = fat[last] );
+
+    fat[last] = boot->free_ptr;
+    boot->free_ptr = clsHead;
+    boot->free_cls_cnt += clsCnt;
+
+    return;
+}
+
+
+
+
 int ofsExtendFile( OFS_t * ofs, OFSFile_t * file ) {
     if ( ! ( ofs && file ) )
         return -1;
 
-    if ( ofs->boot->free_cls_cnt < 1 )
-        return -1;
-
-    OFSBoot_t * boot = ofs->boot;
     OFSPtrList_t * pList = file->cls_list;
-    OFSPtr_t freeHead = boot->free_ptr;
+    OFSPtr_t freeHead;
+    bool flagAppend = false;
 
-    boot->free_ptr = ofs->fat[freeHead];
-    boot->free_cls_cnt--;
+    freeHead = ofsAllocClusters(ofs, 1);
+    if ( freeHead == OFS_INVALID_CLUSTER )
+        goto cleanup;
 
     ofs->fat[ pList->tail ] = freeHead;
-    ofs->fat[freeHead] = OFS_LAST_CLUSTER;
-    appendItem(pList, freeHead);
+    flagAppend = appendItem(pList, freeHead) != OFS_INVALID_CLUSTER;
 
+    if ( ! flagAppend )
+        goto cleanup;
+
+    //  Il cluster potrebbe essere sporco falsando
+    //  struttura della directory
+    if ( file->flags & OFS_FLAG_DIR ) {
+        OFSCluster_t * cls = ofsGetCluster(ofs, freeHead);
+        if ( ! cls )
+            goto cleanup;
+
+        memset( cls->data, '\0', cls->size );
+
+        ofsFreeCluster(cls);
+    }
 
     return 0;
+
+cleanup:
+
+    if ( flagAppend )
+        popItem(pList);
+
+    return -1;
+
 }
 
 int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file ) {
     if ( ! ( ofs && file ) )
         return -1;
 
-
-    OFSBoot_t * boot    = ofs->boot;
     OFSPtrList_t * pList= file->cls_list;
     OFSPtr_t tail;
 
     tail = popItem(pList);
     if ( tail == OFS_INVALID_CLUSTER )
         return -1;
-    
-    ofs->fat[tail] = boot->free_ptr;
-    boot->free_cls_cnt++;
+
+    ofsDeallocClusters(ofs, tail);
 
     if ( pList->size > 0 )
         ofs->fat[ pList->tail ] = OFS_LAST_CLUSTER;
@@ -755,4 +789,71 @@ int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file ) {
 }
 
 
+
+
+
+OFSFileHandle_t * ofsOpenFileHandle( OFS_t * ofs, OFSFile_t * file ) {
+    if ( ! ( ofs && file ) )
+        return NULL;
+
+    OFSFileHandle_t * ret;
+    off_t idx;
+
+    ret = calloc( 1, sizeof( OFSFileHandle_t ) );
+    if ( ! ret )
+        goto cleanup;
+
+    idx = arrayInsert(ofs->fhmem, ret);
+    if ( idx == ARRAY_ITEM_INVALID )
+        goto cleanup;
+
+    ret->fhmem_idx = idx;
+    ret->fomem_idx = file->fomem_key;
+    ret->open_flags= 0;
+    ret->seek_ptr  = 0;
+
+    file->refs++;
+
+    return ret;
+
+cleanup:
+
+    if ( ret )
+        free(ret);
+
+    return NULL;
+}
+
+
+void ofsCloseFileHandle( OFS_t * ofs, OFSFileHandle_t * fh ) {
+    if ( ! (ofs && fh) )
+        return;
+
+    OFSFile_t * file;
+
+    file = numHTGet(ofs->fomem, fh->fomem_idx);
+    if ( file )
+        file->refs--;
+
+    arrayRemove(ofs->fhmem, fh->fhmem_idx);
+    free(fh);
+}
+
+OFSFileHandle_t * ofsGetFileHandle( OFS_t * ofs, off_t idx ) {
+    if ( ! ofs )
+        return NULL;
+
+    if ( idx == ARRAY_ITEM_INVALID )
+        return NULL;
+
+    return arrayGet(ofs->fhmem, idx);
+}
+
+
+OFSFile_t * ofsGetFile( OFS_t * ofs, NumHTKey_t key ) {
+    if ( ! ofs )
+        return NULL;
+    
+    return numHTGet(ofs->fomem, key);
+}
 

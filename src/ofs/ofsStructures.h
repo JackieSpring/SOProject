@@ -49,12 +49,12 @@ enum OFSPtrCode {
 
 typedef struct __attribute__((__packed__)) OFSBootStruct {
     uint32_t magic      : 24;
-    uint8_t  version;
+    uint8_t  version;               // 4 byte
 
     OFSSecSize_t sec_size   : 24;
-    OFSClsSize_t  cls_size;
-    OFSSec_t sec_cnt;
-    OFSPtr_t cls_cnt;
+    OFSClsSize_t  cls_size;         // 8 byte
+    OFSSec_t sec_cnt;               // 16 byte
+    OFSPtr_t cls_cnt;               // 20 byte
 
     OFSPtr_t root_dir_ptr;  // Root directory 
     OFSPtr_t free_cls_cnt;

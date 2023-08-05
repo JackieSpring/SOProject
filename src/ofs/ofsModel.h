@@ -8,6 +8,8 @@
 
 #include "../utils/generic.h"
 #include "../utils/devicehndl.h"
+#include "../utils/numhashtable.h"
+#include "../utils/array.h"
 #include "ofsStructures.h"
 #include "ofsListType.h"
 
@@ -18,7 +20,11 @@
 #define OFS_FHMEM_INIT_SIZE 0x10
 
 
-
+//  OGGETTI FILE
+//  rappresentano un file del file system,
+//  contengono tutte le sue informazioni generali
+//  e il numero di "riferimenti" ovvero il numero
+//  di handles attualmente attivi su questo file
 typedef struct OFSFileStruct_t {
     OFSFileName_t * name;
     OFSFileNameSize_t name_size;
@@ -26,7 +32,8 @@ typedef struct OFSFileStruct_t {
     OFSPtr_t        parent_dir;
     OFSFlags_t      flags;
     uint64_t        size;
-    off_t           fhmem_idx;
+    NumHTKey_t      fomem_key;
+    size_t          refs;
 } OFSFile_t ;
 
 typedef struct OFSDirStruct_t {
@@ -35,7 +42,23 @@ typedef struct OFSDirStruct_t {
     off_t    entries;
 } OFSDir_t;
 
+//  FILE HANDLES
+//  Rappresentano degli "handle" dei file
+//  ovvero dei "riferimenti" aperti dai
+//  processi
+typedef struct OFSFileHandleStruct_t {
+    int         open_flags;
+    off_t       seek_ptr;
+    off_t       fhmem_idx;
+    NumHTKey_t  fomem_idx;
+} OFSFileHandle_t;
 
+
+//  CLUSTER OBJECT
+//  Rappresenta un singolo cluster del file
+//  system, contiene la sua dimenzione e 
+//  un puntatore ai dati del cluster
+//  mappati in memoria
 typedef struct OFSClusterStruct_t {
     OFSPtr_t        cls_number;
     OFSPtr_t        next;
@@ -57,10 +80,8 @@ typedef struct OFSStruct_t {
 
     OFSFile_t * root_dir;
 
-    off_t       fhmem_bottom;
-    off_t       fhmem_free;
-    off_t       fhmem_size;
-    OFSFile_t ** fhmem;
+    Array_t *   fhmem;
+    NumHT_t *   fomem;      // mappa di File Object
 } OFS_t;
 
 
@@ -164,10 +185,24 @@ int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callb
 
 
 
-
+/*
+ *  Estende o riduce un file di un cluster
+*/
 int ofsExtendFile( OFS_t * ofs, OFSFile_t * file );
 int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file );
 
+/*
+ *  Alloca cnt cluster e ritorna la testa della catena
+*/
+OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt );
+/*
+ *  Data una catena di cluster li dealloca
+*/
+void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead );
 
 
-OFSFile_t * ofsGetFileHandle( OFS_t * ofs, off_t idx );
+OFSFileHandle_t * ofsOpenFileHandle( OFS_t * ofs, OFSFile_t * file );
+void ofsCloseFileHandle( OFS_t * ofs, OFSFileHandle_t * fh );
+OFSFileHandle_t * ofsGetFileHandle( OFS_t * ofs, off_t idx );
+
+OFSFile_t * ofsGetFile( OFS_t * ofs, NumHTKey_t key );

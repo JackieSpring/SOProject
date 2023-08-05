@@ -21,7 +21,7 @@ typedef struct DirIteratorToolsStruct {
 
 
 bool _ofsReadDirIterator( OFSDentry_t * dent, DirIteratorTools * dt ) {
-
+    
     if ( dent->file_flags == OFS_FLAG_FREE )
         return true;
 
@@ -47,8 +47,9 @@ bool _ofsReadDirIterator( OFSDentry_t * dent, DirIteratorTools * dt ) {
 int ofs_opendir (const char * path, struct fuse_file_info * fi) {
 
     struct fuse_context * fc = fuse_get_context();
-    OFS_t * ofs = fc->private_data;
-    OFSFile_t * file = NULL;
+    OFS_t * ofs             = fc->private_data;
+    OFSFile_t * file        = NULL;
+    OFSFileHandle_t * fileH = NULL;
     int errcode = 0;
 
 
@@ -59,13 +60,17 @@ int ofs_opendir (const char * path, struct fuse_file_info * fi) {
     if ( ! (file->flags & OFS_FLAG_DIR) )
         cleanup_errno(ENOTDIR);
 
-    fi->fh = file->fhmem_idx;
+    fileH = ofsOpenFileHandle(ofs, file);
+    if ( fileH == NULL )
+        cleanup_errno(EIO);
+    
+    fi->fh = fileH->fhmem_idx;
 
     return 0;
 
 cleanup:
 
-    if ( file )
+    if ( file && file->refs < 1 )
         ofsCloseFile(ofs, file);
 
     return -errcode;
@@ -73,19 +78,29 @@ cleanup:
 
 int ofs_releasedir(const char * path, struct fuse_file_info * fi) {
 
+
     struct fuse_context * fc = fuse_get_context();
-    OFS_t * ofs = fc->private_data;
-    OFSFile_t * file = NULL;
+    OFS_t * ofs             = fc->private_data;
+    OFSFile_t * file        = NULL;
+    OFSFileHandle_t * fileH = NULL;
     int errcode = 0;
+
 
     if ( fi == NULL )
         return 0;
 
-    file = ofsGetFileHandle(ofs, fi->fh);
+    fileH = ofsGetFileHandle(ofs, fi->fh);
+    if ( ! fileH )
+        cleanup_errno(EBADF);
+    
+    file = ofsGetFile( ofs, fileH->fomem_idx ); // TODO!!!!!!!
     if ( file == NULL )
         cleanup_errno(EBADF);
     
-    ofsCloseFile(ofs, file);
+    ofsCloseFileHandle(ofs, fileH);
+
+    if ( file->refs < 1 )
+        ofsCloseFile(ofs, file);
 
 cleanup:
     return -errcode;
@@ -94,15 +109,19 @@ cleanup:
 
 int ofs_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
     struct fuse_context * fc;
-    OFS_t * ofs     = NULL;
-    OFSFile_t * dir = NULL;
-    int errcode;
+    OFS_t * ofs             = NULL;
+    OFSFile_t * dir         = NULL;
+    OFSFileHandle_t * fileH = NULL;
+    int errcode = 0;
 
     fc = fuse_get_context();
     ofs = fc->private_data;
-    //dir = ofsGetPathFile(ofs, path);
-    dir = ofsGetFileHandle(ofs, fi->fh);
 
+    fileH = ofsGetFileHandle(ofs, fi->fh);
+    if ( ! fileH )
+        cleanup_errno(EBADF);
+
+    dir = ofsGetFile(ofs, fileH->fomem_idx);
     if ( ! dir )
         cleanup_errno(ENOENT);
 
@@ -120,16 +139,9 @@ int ofs_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t off
     if ( ofsDirectoryIterator(ofs, dir, _ofsReadDirIterator, &dt) )
         cleanup_errno(EIO);
 
-
-    //ofsCloseFile(ofs, dir);
-    
-
     return 0;
 
 cleanup:
-
-    //if ( dir )
-    //    ofsCloseFile(ofs, dir);
 
     return -errcode;
 
@@ -196,7 +208,7 @@ int ofs_mkdir (const char * path, mode_t mode) {
 
     
     // crea la nuova dentry
-    dent.file_first_cls = ofs->boot->free_ptr;
+    dent.file_first_cls = ofsAllocClusters(ofs, 1);
     memcpy( &dent.file_name, filename, strlen(filename) );
     dent.file_name_size = strlen(filename);
     dent.file_size = 0;
@@ -205,15 +217,11 @@ int ofs_mkdir (const char * path, mode_t mode) {
     if ( mode & O_RDONLY )
         dent.file_flags |= OFS_FLAG_RDONLY;
 
-    // alloca spazio nel file system
-    ofs->boot->free_cls_cnt--;
-    ofs->boot->free_ptr = ofs->fat[ofs->boot->free_ptr];
-    ofs->fat[ dent.file_first_cls ] = OFS_LAST_CLUSTER;
-
     if ( ofsInsertDentry(ofs, dir, &dent) )
         cleanup_errno(EIO);
 
-    ofsCloseFile(ofs, dir);
+    if ( dir->refs < 1 )
+        ofsCloseFile(ofs, dir);
 
     return 0;
 
@@ -223,7 +231,7 @@ cleanup:
     if ( copy )
         free(copy);
 
-    if ( dir )
+    if ( dir && dir->refs < 1 )
         ofsCloseFile(ofs, dir);
 
     return -errcode;
@@ -237,6 +245,7 @@ int ofs_rmdir (const char * path) {
     OFSDir_t * dir      = NULL;
     OFSDir_t * oldDir   = NULL;
     OFSDentry_t * dentry= NULL;
+    OFSPtr_t head       = OFS_LAST_CLUSTER;
     size_t pathLen      = 0;
     char * copy         = NULL;
     char * filename     = NULL;
@@ -293,10 +302,15 @@ int ofs_rmdir (const char * path) {
     if ( oldDir->entries > 0 )
         cleanup_errno(ENOTEMPTY);
 
+    head = oldDir->super.cls_list->head;
+
     ofsDeleteDentry(ofs, dir, filename, strlen(filename));
 
-    ofsCloseFile(ofs, file);
+    if ( file->refs < 1 )
+        ofsCloseFile(ofs, file);
+    
     ofsCloseFile(ofs, oldDir);
+    ofsDeallocClusters(ofs, head);
     ofsFreeDentry(dentry);
 
     return 0;
@@ -306,7 +320,7 @@ cleanup:
     if ( copy )
         free(copy);
 
-    if ( file )
+    if ( file && file->refs < 1 )
         ofsCloseFile(ofs, file);
 
     if ( dentry )

@@ -30,7 +30,8 @@ int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi
 
     struct fuse_context * fc = fuse_get_context();
     OFS_t * ofs = fc->private_data;
-    OFSFile_t * file = NULL;
+    OFSFile_t * file        = NULL;
+    OFSFileHandle_t * fH    = NULL;
     int errcode = 0;
     bool fileOpen = false;
 
@@ -39,9 +40,13 @@ int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi
 
     if ( ! fileOpen )
         file = ofsGetPathFile(ofs, (char *) path);
-    else
-        file = ofsGetFileHandle(ofs, fi->fh);
-
+    else {
+        fH = ofsGetFileHandle(ofs, fi->fh);
+        if ( ! fH )
+            cleanup_errno(EBADF);
+        
+        file = ofsGetFile(ofs, fH->fomem_idx);
+    }
     if ( file == NULL )
         cleanup_errno(ENOENT);
 
@@ -63,13 +68,15 @@ int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi
 
 
     if ( file->flags & OFS_FLAG_DIR )
-        stbuf->st_mode = S_IFDIR | S_IXUSR;
+        stbuf->st_mode = S_IFDIR ;
 
     if ( file->flags & OFS_FLAG_FILE )
-        stbuf->st_mode = S_IFREG;
+        stbuf->st_mode = S_IFREG ;
 
     if ( file->flags & OFS_FLAG_RDONLY )
-        stbuf->st_mode &= S_IRUSR;
+        stbuf->st_mode |= S_IRUSR;
+    else
+        stbuf->st_mode |= S_IXUSR | S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP | S_IROTH;
 
 
     if ( ! fileOpen )
