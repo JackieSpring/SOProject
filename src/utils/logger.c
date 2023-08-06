@@ -13,8 +13,11 @@ Logger * newLogger( char * logfile ) {
 
     if ( logfile == NULL )
         fp = stdout;
-    fp = fopen( logfile, "a" );
+    else
+        fp = fopen( logfile, "a" );
 
+    if ( ! fp )
+        return NULL;
 
     Logger * ret = malloc( sizeof( Logger ) );
     if ( ret == NULL )

@@ -156,6 +156,7 @@ int main(int argc , char * argv[]) {
 
     fflush(stdout);
 
+puts("Access");
 
     // Apertura device
 
@@ -177,6 +178,8 @@ int main(int argc , char * argv[]) {
                 cleanup_escape( logger, "Something went wrong while trying to open the device" );
     }
 
+puts("DEV");
+
     dev = openDev( options.device );
     if ( dev == NULL ) {
         if ( errno == EACCES )
@@ -186,6 +189,10 @@ int main(int argc , char * argv[]) {
     }
     // Formattazione
 
+puts("FORMATT");
+
+printf( "logger: %p \n", logger );
+
     if ( ! ofsIsDeviceFormatted(dev) ) {
         notifyMessage( logger, "Il device deve essere formattao" );
         notifyMessage(logger, "Inizio formattazione...");
@@ -194,6 +201,7 @@ int main(int argc , char * argv[]) {
         notifyMessage(logger, "Formattazione completata con successo");
     }
 
+puts("OPEN");
 
     ofs = ofsOpen( dev );
     if ( ! ofs ){

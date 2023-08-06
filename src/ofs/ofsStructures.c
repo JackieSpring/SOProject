@@ -53,6 +53,9 @@ extern inline off_t ofsSectorToByte( OFSBoot_t * ofsb, OFSSec_t sp ) {
 
 
 int ofsFormatDevice( DEVICE * dev ) {
+
+    puts("DO FORMAT");
+
     OFSBoot_t boot;
     OFSDentry_t rootd;
     int ret = 0;
@@ -141,6 +144,8 @@ cleanup:
 
 bool ofsIsDeviceFormatted( DEVICE * dev ) {
     uint32_t magic = 0;
+
+    puts("IS FORMATTED");
 
     if ( readDev( dev, &magic, 3, 0 ) < 3 )
         return false;

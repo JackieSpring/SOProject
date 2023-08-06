@@ -64,7 +64,7 @@ ssize_t readDev( DEVICE * dev, char * buf, size_t size, off_t off ) {
     ssize_t ret;
     ssize_t read_byte = 0;
 
-
+puts("READ START");
     while ( read_byte < size ) {
         ret = pread( dev->dd, buf + read_byte, size - read_byte, off + read_byte );
 
@@ -74,7 +74,7 @@ ssize_t readDev( DEVICE * dev, char * buf, size_t size, off_t off ) {
 
         read_byte += ret;
     }
-
+puts("READ DONE");
     return read_byte;
 }
 
