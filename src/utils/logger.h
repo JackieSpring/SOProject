@@ -9,12 +9,14 @@
 
 
 
-struct LoggerStruct;
+struct LoggerStruct {
+    FILE * file;
+};
 typedef struct LoggerStruct Logger;
 
 
 // NULL for stdout
-Logger * newLogger( FILE * logfile );
+Logger * newLogger( char * path );
 
 void closeLogger( Logger * );
 

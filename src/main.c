@@ -28,7 +28,7 @@
 #define OPTION(t, p)    { t, offsetof(struct options, p), 1 }
 
 
-DEVICE * dev;
+DEVICE * dev = NULL;
 
 
 static struct options {
@@ -75,26 +75,15 @@ rename      // rinomina file
 static void of_destroy( void * private_data ) {
     OFS_t * ofs = private_data;
     ofsClose(ofs);
-}
-
-
-static int of_open( const char * path, struct fuse_file_info * fi ) {
-    return 0;
-}
-
-static int of_read( const char * path, char * buff, size_t size, off_t offset, struct fuse_file_info * fi ) {
-    return 0;
-}
-
-static int of_write( const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info * fi ) {
-    return 0;
+    closeLogger(logger);
+    closeDev(dev);
 }
 
 
 
 static void show_help(const char * progname) {
-	printf("usage: %s [options] <mountpoint>\n\n", progname);
-	printf("File-system specific options:\n"
+	fprintf(stdout, "usage: %s [options] <mountpoint>\n\n", progname);
+	fprintf(stdout, "File-system specific options:\n"
 	       "    -d <s>              Name of the device file\n"
 	       "                        (default: \""DEV_DEFAULT"\")\n"
 	       "    -l <s>              Name of the log file\n"
@@ -105,11 +94,12 @@ static void show_help(const char * progname) {
 
 
 static const struct fuse_operations of_ops = {
-    .init       = NULL,//of_init,
+    .init       = NULL,
     .destroy    = of_destroy,
 
     .getattr    = ofs_getattr,
     .access     = ofs_access,
+    .statfs     = ofs_statfs,
     .rename     = ofs_rename,
 
     .opendir    = ofs_opendir,
@@ -124,6 +114,12 @@ static const struct fuse_operations of_ops = {
 
     .open       = ofs_open,
     .release    = ofs_release,
+
+    .read       = ofs_read,
+    .write      = ofs_write,
+
+    .lseek      = ofs_lseek,
+    .truncate   = ofs_truncate,
 };
 
 
@@ -131,6 +127,7 @@ int main(int argc , char * argv[]) {
 
     int ret ;
     struct fuse_args args = FUSE_ARGS_INIT( argc, argv );
+    OFS_t * ofs = NULL;
 
 
 
@@ -149,18 +146,13 @@ int main(int argc , char * argv[]) {
 		args.argv[0][0] = '\0';
 	}
 
-
-
-
-
-
     // Apertura del logger
-
-    FILE * logfile = NULL;
-    if ( options.logfile )
-        logfile = fopen( options.logfile, "a" );
     
-    logger = newLogger(logfile);
+    logger = newLogger(options.logfile);
+    if ( ! logger ){
+        perror( "Errore durante l'apertura del logger" );
+        goto cleanup;
+    }
 
     fflush(stdout);
 
@@ -192,44 +184,40 @@ int main(int argc , char * argv[]) {
         else 
             cleanup_escape( logger, "Something went wrong while trying to open the device" );
     }
-
-    
     // Formattazione
 
-    if ( ofsIsDeviceFormatted(dev) )
-        notifyMessage(logger, "Il device è gia stato formattato");
-    else {
+    if ( ! ofsIsDeviceFormatted(dev) ) {
         notifyMessage( logger, "Il device deve essere formattao" );
-
+        notifyMessage(logger, "Inizio formattazione...");
         if ( ofsFormatDevice(dev) )
             notifyError( logger, "Errore durante la formattazione del device");
+        notifyMessage(logger, "Formattazione completata con successo");
     }
-    printf( "dev st_blksize: %d\n", dev->dstat.st_blksize );
 
 
-    OFS_t * ofs = ofsOpen( dev );
+    ofs = ofsOpen( dev );
     if ( ! ofs ){
-        perror("OFS non è stato aperto");
         notifyError(logger, "errore durante l'apertura del file system");
         goto cleanup;
     }
-
-
-    printf( "root: %p\n", ofs->root_dir );
-
-    // DEBUGGGGGG
-
-    //return 0;
-
-    // DEBUGGGGG
+    
 
 	ret = fuse_main(args.argc, args.argv, &of_ops, ofs);
 	fuse_opt_free_args(&args);
-    //closeLogger(log);
+
 	return ret;
 
 cleanup:
 	fuse_opt_free_args(&args);
+
+    if ( ofs )
+        ofsClose(ofs);
+
+    if ( dev )
+        closeDev(dev);
+
+    if ( logger )
+        closeLogger(logger);
 
     perror( "program exited with failure" );
 

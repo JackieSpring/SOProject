@@ -86,11 +86,6 @@ typedef struct OFSStruct_t {
 
 
 
-typedef bool (* directory_iterator) ( OFSDentry_t * dentry, void * extra );
-
-
-
-
 /**
  *  Apre il file system e ritorna un handler
  *
@@ -105,6 +100,16 @@ OFS_t * ofsOpen( DEVICE * dev );
  *  Chiude l'handler del file system aperto
 */
 void ofsClose( OFS_t * ofs );
+
+
+/*
+ *  Alloca cnt cluster e ritorna la testa della catena
+*/
+OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt );
+/*
+ *  Data una catena di cluster li dealloca
+*/
+void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead );
 
 /**
  *  Ottiene un oggetto Cluster da un puntatore a cluster
@@ -123,25 +128,6 @@ OFSCluster_t * ofsGetCluster( OFS_t * ofs, OFSPtr_t ptr );
 */
 void ofsFreeCluster( OFSCluster_t * cls );
 
-
-/**
- *  Ottiene un file handle per la dentry specificata
- *  se il file dovesse avere OFS_FLAG_INVALID attiva
- *  allora l'handle non verrà generato
- *
- *  @param  dentry      Puntatore alla dentry che rappresenta
- *                      il file
- *
- *  @return             Ritorna un puntatore all'handle o NULL
-*/
-OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry );
-
-/**
- *  Chiude l'handle del file e libera le sue risorse
- *  @param  file    handle del file
-*/
-void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file );
-
 /**
  *  Cerca una dentry a partire dal nome del file all'interno 
  *  di una directory. Lo spazio per la dentry è allocato dalla
@@ -158,51 +144,83 @@ void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file );
 OFSDentry_t * ofsGetDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
 void ofsFreeDentry( OFSDentry_t * dent );
 
-/**
- *  Inserisce una dentry in una directory; la funzione non gestisce
- *  i casi di duplicati. La nuova dentry sarà una copia della dentry 
- *  passata tra gli argomenti.
- *
- *  @param  ofs 
- *  @param  file    directory in cui inserire la dentry
- *  @param  dent    dentry da inserire
- *
- *  @return     0 o -1 in caso di errore
- *
-*/
-int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent );
-void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize );
 
 /**
- *  Ottiene un file a partire dal percorso
+ *  Ottiene un file handle per la dentry specificata
+ *  se il file dovesse avere OFS_FLAG_INVALID attiva
+ *  allora l'handle non verrà generato.
+ *  Il file così aperto verrà salvato nella memoria
+ *  dei file aperti.
+ *
+ *  @param  dentry      Puntatore alla dentry che rappresenta
+ *                      il file
+ *
+ *  @return             Ritorna un puntatore all'handle o NULL
 */
-OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path );
+OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry );
 
 /**
- *  Itera attraverso tutte le dentry di una directory
+ *  Se non il file non ha riferimenti attivi, lo rimuove
+ *  dalla memoria dei file aperti e libera le sue risorse.
+ *  Se il file dovesse coincidere con la root directory
+ *  memorizzata in 'ofs', la risorsa non verrà chiusa.
+ *
+ *  @param  file    Oggetto file
 */
-int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callback, void * extra );
+void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file );
 
-
-
-/*
- *  Estende o riduce un file di un cluster
+/**
+ *  Ottiene un file precedentemente aperto identificato dalla 
+ *  key.
+ *  @param  key     Chiave d'identificazione del file
+ *                  nella memoria dei file aperti
+ *
+ *  @return     Puntatore al file o NULL
 */
-int ofsExtendFile( OFS_t * ofs, OFSFile_t * file );
-int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file );
-
-/*
- *  Alloca cnt cluster e ritorna la testa della catena
-*/
-OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt );
-/*
- *  Data una catena di cluster li dealloca
-*/
-void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead );
-
-
-OFSFileHandle_t * ofsOpenFileHandle( OFS_t * ofs, OFSFile_t * file );
-void ofsCloseFileHandle( OFS_t * ofs, OFSFileHandle_t * fh );
-OFSFileHandle_t * ofsGetFileHandle( OFS_t * ofs, off_t idx );
-
 OFSFile_t * ofsGetFile( OFS_t * ofs, NumHTKey_t key );
+
+/**
+ *  Alloca lo spazio per un nuovo file e restituisce una
+ *  dentry di riferimento al file.
+ *  Il file creato avrà allocato un solo cluster e size zero,
+ *  se sia una directory ad essere creata il cluster viene azzerato.
+ *  Il file creato non appartiene a nessuna directory,
+ *  l'assegnazione all'albero di directory dovrà essere
+ *  svolta in un secondo momento.
+ *  Come per ofsGetDentry(), la dentry dovrà essere liberata
+ *  tramite ofsFreeDentry().
+ *
+ *  @param  fname       nome del file
+ *  @param  fnsize      dimensione in byte del nome file
+ *  @param  flags       flag del file
+ *
+ *  @return     Puntatore alla dentry o NULL
+*/
+OFSDentry_t * ofsCreateEmptyFile( OFS_t * ofs, const char * fname, size_t fnsize, OFSFlags_t flags );
+
+
+/**
+ *  Apre una handle sul file specificato e la registra nella
+ *  memoria delle handle aperte; questa operazione incrementa
+ *  il numero di riferimenti al file indicato impedendone la
+ *  chiusura.
+ *
+ *  @param  file    File di cui aprire l'handle
+ *
+ *  @return     puntatore alla handle o NULL
+*/
+OFSFileHandle_t * ofsOpenFileHandle( OFS_t * ofs, OFSFile_t * file );
+
+/**
+ *  Chiude la handle, rimuovendola dalla
+ *  memoria delle handle aperte e riducendo i riferimenti al
+ *  file associato.
+ *
+ *  @param  fh      Handle che deve essere distrutta
+*/
+void ofsCloseFileHandle( OFS_t * ofs, OFSFileHandle_t * fh );
+
+/**
+ *  Ottiene la handle identificata dall'indice
+*/
+OFSFileHandle_t * ofsGetFileHandle( OFS_t * ofs, off_t idx );

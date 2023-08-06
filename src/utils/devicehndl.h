@@ -7,11 +7,21 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 
 
 
 struct deviceStruct {
-    struct stat dstat;
+    dev_t   dev;
+    uid_t   uid;
+    gid_t   gid;
+    mode_t  mode;
+    off_t   size;
+    blksize_t   blksize;
+    blkcnt_t    blkcnt;
     int dd;
 };
 typedef struct deviceStruct DEVICE ;

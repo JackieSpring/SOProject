@@ -94,7 +94,7 @@ int ofs_releasedir(const char * path, struct fuse_file_info * fi) {
     if ( ! fileH )
         cleanup_errno(EBADF);
     
-    file = ofsGetFile( ofs, fileH->fomem_idx ); // TODO!!!!!!!
+    file = ofsGetFile( ofs, fileH->fomem_idx );
     if ( file == NULL )
         cleanup_errno(EBADF);
     
@@ -155,7 +155,7 @@ int ofs_mkdir (const char * path, mode_t mode) {
     OFSFile_t * dir     = NULL;
     char * copy         = NULL;
     char * filename     = NULL;
-    OFSDentry_t dent    = {0};
+    OFSDentry_t * dent  = NULL;
     size_t  pathLen     = 0;
     int errcode         = 0;
     register void * tool;
@@ -205,20 +205,18 @@ int ofs_mkdir (const char * path, mode_t mode) {
         cleanup_errno(EEXIST);
     }
 
-    
-    // crea la nuova dentry
-    dent.file_first_cls = ofsAllocClusters(ofs, 1);
-    memcpy( &dent.file_name, filename, strlen(filename) );
-    dent.file_name_size = strlen(filename);
-    dent.file_size = 0;
-    dent.file_flags = OFS_FLAG_DIR;
+    dent = ofsCreateEmptyFile(ofs, filename, strlen(filename), OFS_FLAG_DIR);
+    if ( ! dent )
+        cleanup_errno(ENOSPC);
 
     if ( mode & O_RDONLY )
-        dent.file_flags |= OFS_FLAG_RDONLY;
+        dent->file_flags |= OFS_FLAG_RDONLY;
+    
 
-    if ( ofsInsertDentry(ofs, dir, &dent) )
+    if ( ofsInsertDentry(ofs, dir, dent) )
         cleanup_errno(EIO);
 
+    ofsFreeDentry(dent);
     ofsCloseFile(ofs, dir);
 
     return 0;
@@ -231,6 +229,11 @@ cleanup:
 
     if ( dir )
         ofsCloseFile(ofs, dir);
+
+    if ( dent ) {
+        ofsDeallocClusters(ofs, dent->file_first_cls);
+        ofsFreeDentry(dent);
+    }
 
     return -errcode;
 }

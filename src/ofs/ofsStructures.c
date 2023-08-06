@@ -1,18 +1,8 @@
 
 #include "ofsStructures.h"
 
-
-
 /*
-    n >= 4 / ( p * s^2 )    // dimensione del cluster per un consumo della FAT di p% settori
-                            // al numeratore va il numero di byte che compongono un indirizzo
 
-    e = 1 / n               // indice di frammentazione dei settori
-
-    s = 4 e / p             // legame settori-consumo-frammentazione
-
-    al crescere della dimensione di un cluster si riduce la dimensione della FAT, 
-    ma aumenta la frammentazione 
 */
 
 
@@ -69,16 +59,12 @@ int ofsFormatDevice( DEVICE * dev ) {
 
     boot.magic = OFS_MAGIC;
     boot.version = OFS_VERSION;
-    boot.sec_size = dev->dstat.st_blksize;
-    boot.sec_cnt = dev->dstat.st_blocks;
-    boot.root_dir_ptr = 0;  // DA CALCOLARE
+    boot.sec_size = dev->blksize;
+    boot.sec_cnt = dev->blkcnt;
+    boot.root_dir_ptr = OFS_INVALID_CLUSTER;  // DA CALCOLARE
     boot.free_cls_cnt = 0;  // DA CALCOLARE
     boot.free_ptr = 0;      // DA CALCOLARE
 
-    //DEBUG
-    boot.sec_size = 512;
-    boot.sec_cnt = 150;
-    //DEBUG
 
     boot.cls_size = ofsCalculateClusterSize( &boot );
     boot.cls_cnt = ofsCalculateClusterCount( &boot );
@@ -86,10 +72,6 @@ int ofsFormatDevice( DEVICE * dev ) {
     boot.fat_sec = ofsCalculateFatStart( &boot );
     boot.first_sec = ofsCalculateFirstSec( &boot );
 
-    printf( "cls_cnt: %d\n", boot.cls_cnt );
-    printf( "cls_size: %d\n", boot.cls_size );
-    printf( "fat: %d\n", boot.fat_sec );
-    printf( "first: %d\n", boot.first_sec );
 
     // Formatta la fat scrivendola un cluster per volta
     // le prime due entry della fat sono cluster riservati,
@@ -126,11 +108,11 @@ int ofsFormatDevice( DEVICE * dev ) {
             for ( uint64_t i = 0; i < OFS_FIRST_DATA_CLUSTER ; i++ )
                 fat_page[i] = (OFSPtr_t) OFS_RESERVED_CLUSTER;
             
-            fat_page[ OFS_FIRST_DATA_CLUSTER ] = OFS_LAST_CLUSTER;
-            boot.root_dir_ptr = OFS_FIRST_DATA_CLUSTER;
+            //fat_page[ OFS_FIRST_DATA_CLUSTER ] = OFS_LAST_CLUSTER;
+            //boot.root_dir_ptr = OFS_FIRST_DATA_CLUSTER;
 
-            boot.free_ptr = OFS_FIRST_DATA_CLUSTER + 1;
-            boot.free_cls_cnt = boot.cls_cnt - OFS_FIRST_DATA_CLUSTER - 1;
+            boot.free_ptr = OFS_FIRST_DATA_CLUSTER;
+            boot.free_cls_cnt = boot.cls_cnt - OFS_FIRST_DATA_CLUSTER;
 
         }
 

@@ -83,18 +83,19 @@ cleanup:
 
 
 // Ritorna l'elemento precedente a quello inserito 
-// TODO MEMORY LEAK
 OFSPtr_t appendItem( OFSPtrList_t * list , OFSPtr_t item ) {
     if ( ! list )
-        goto cleanup;
+        return OFS_INVALID_CLUSTER;
 
     if (item == OFS_INVALID_CLUSTER ||
         item == OFS_RESERVED_CLUSTER ||
         item == OFS_LAST_CLUSTER )
-        goto cleanup;
+        return OFS_INVALID_CLUSTER;
 
     OFSPtr_t ret;
-    OFSPtr_t * table = realloc( list->table, ( list->size * sizeof( OFSPtr_t ) ) + sizeof( OFSPtr_t ) );
+    OFSPtr_t * table;
+
+    table = realloc( list->table, ( list->size * sizeof( OFSPtr_t ) ) + sizeof( OFSPtr_t ) );
     if ( table == NULL )
         goto cleanup;
 

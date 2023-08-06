@@ -23,7 +23,7 @@ OFS_t * ofsOpen( DEVICE * dev ) {
     ofs->boot = MAP_FAILED;
     ofs->fat = MAP_FAILED;
     ofs->fat_size = 0;
-    ofs->root_dir = NULL;   // TODO
+    ofs->root_dir = NULL;
 
     // Mappa in memoria l'intero boot sector del file system
     // in modo da potervi facilemnte accedere come struttura
@@ -74,18 +74,32 @@ OFS_t * ofsOpen( DEVICE * dev ) {
     ofs->fomem = fomem;
 
 
-    // ROOT DIRECTORY
-    OFSDentry_t rootDentry = {
-        .file_first_cls = ofs->boot->root_dir_ptr,
-        .file_flags = OFS_FLAG_DIR,
-        .file_name = '\0',
-        .file_name_size = 0,
-        .file_size = 0,
-    };
+    OFSDentry_t dummyDentry = {0};
+    OFSDentry_t * rootDentry = NULL;
 
-    ofs->root_dir = ofsOpenFile(ofs, &rootDentry);
+    if ( ofs->boot->root_dir_ptr == OFS_INVALID_CLUSTER ) {
+        rootDentry = ofsCreateEmptyFile(ofs, NULL, 0, OFS_FLAG_DIR);
+        if ( ! rootDentry )
+            goto cleanup;
+    }
+    else {
+        dummyDentry.file_first_cls = ofs->boot->root_dir_ptr;
+        dummyDentry.file_flags = OFS_FLAG_DIR;
+        dummyDentry.file_name[0] = '\0';
+        dummyDentry.file_name_size = 0;
+        dummyDentry.file_size = 0;
+
+        rootDentry = &dummyDentry;
+    }
+
+    ofs->root_dir = ofsOpenFile(ofs, rootDentry);
     if ( ofs->root_dir == NULL )
         goto cleanup;
+
+    if ( ofs->boot->root_dir_ptr == OFS_INVALID_CLUSTER ) {
+        ofs->boot->root_dir_ptr = rootDentry->file_first_cls;
+        ofsFreeDentry(rootDentry);
+    }
 
     
     return ofs;
@@ -182,128 +196,60 @@ void ofsFreeCluster( OFSCluster_t * cls ) {
 }
 
 
+OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt ) {
+    if ( ! ( ofs && cnt ) )
+        return OFS_INVALID_CLUSTER;
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//  FILE OPS
-//
+    OFSBoot_t * boot    = ofs->boot;
+    OFSPtr_t * fat      = ofs->fat;
+    OFSPtr_t freeHead;
+    OFSPtr_t last;
 
-OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
-
-    if ( !( ofs && dentry ) )
-        return NULL;
-
-    if ( dentry->file_flags & OFS_FLAG_INVALID )
-        return NULL;
-
-    OFSFile_t * ret         = NULL;
-    OFSFileName_t * name    = NULL;
-    OFSPtrList_t * clist    = NULL;
-    NumHTKey_t fomem_key    = OFS_INVALID_CLUSTER;
-    unsigned long objSize   = 0;
-
-    if ( (ret = numHTGet(ofs->fomem, dentry->file_first_cls)) )
-        return ret;
-    else
-        ret = NULL;
-
-
-    if ( dentry->file_flags & OFS_FLAG_DIR )
-        objSize = sizeof( OFSDir_t );
-    else
-        objSize = sizeof( OFSFile_t );
-
-    ret = (OFSFile_t *) calloc( 1, objSize );
-    if ( ! ret )
+    if ( boot->free_cls_cnt < cnt )
         goto cleanup;
 
+    freeHead = boot->free_ptr;
+    last = freeHead;
 
-    name = (OFSFileName_t *) calloc( 1, dentry->file_name_size );
-    if ( name == NULL )
-        goto cleanup;
+    for ( size_t i = 1 ; i < cnt ; i++, last = fat[last] );
 
-    memcpy(name, dentry->file_name, dentry->file_name_size);
+    boot->free_cls_cnt -= cnt;
+    boot->free_ptr = fat[last];
+    fat[last] = OFS_LAST_CLUSTER;
 
-    
-    clist = createList(ofs->fat, dentry->file_first_cls);
-    if ( clist == NULL )
-        goto cleanup;
-
-
-    fomem_key = dentry->file_first_cls;
-    if ( numHTInsert(ofs->fomem, fomem_key, ret) )
-        goto cleanup;
-
-    ret->name       = name;
-    ret->cls_list   = clist;
-    ret->name_size  = dentry->file_name_size;
-    ret->flags      = dentry->file_flags;
-    ret->size       = dentry->file_size;
-    ret->fomem_key  = fomem_key;
-    ret->parent_dir = OFS_INVALID_CLUSTER; // TODO
-    ret->refs       = 0;
-
-    // Se directory, inizializza l'oggetto
-    if ( ret->flags & OFS_FLAG_DIR ) {
-        OFSDir_t * dret = (OFSDir_t *)ret;
-        OFSCluster_t * cls = NULL;
-        OFSDentry_t * dList;
-        OFSDentry_t * sample;
-        off_t    ecnt = 0;
-
-        cls = ofsGetCluster(ofs, ret->cls_list->tail);
-        if ( cls == NULL )
-            goto cleanup;
-        dList = (OFSDentry_t *) cls->data;
-
-        // Conta le entry occupate nell'ultimo cluster
-        // le dentry sono disposte ammassate in cima al
-        // cluster mentre in fondo rimangono quelle libere
-        for ( ; ecnt < ofs->cls_dentries && (dList[ecnt].file_flags != OFS_FLAG_FREE) ; ecnt++ );
-
-        dret->entries = ((ret->cls_list->size - 1) * ofs->cls_dentries ) + ecnt;
-        dret->last_entry_index = ecnt - 1;
-        
-    }
-
-    return ret;
-    
+    return freeHead;
 
 cleanup:
-
-    if ( name )
-        free(name);
-
-    if ( clist )
-        destroyList(clist);
-
-    if ( fomem_key != OFS_INVALID_CLUSTER )
-        numHTRemove(ofs->fomem, fomem_key);
-
-    if (ret)
-        free(ret);
-
-    return NULL;
+    return OFS_INVALID_CLUSTER;
 }
 
+void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead ) {
 
-void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file ) {
-    if ( ! file )
+    if ( ! ofs )
         return;
 
-    if ( file == ofs->root_dir )
+    if (clsHead == OFS_INVALID_CLUSTER ||
+        clsHead == OFS_RESERVED_CLUSTER ||
+        clsHead == OFS_LAST_CLUSTER )
         return;
 
-    if ( file->refs > 0 )
-        return;
+    OFSBoot_t * boot    = ofs->boot;
+    OFSPtr_t * fat      = ofs->fat;
+    OFSPtr_t freeHead;
+    OFSPtr_t last;
+    size_t clsCnt = 1;
 
-    numHTRemove(ofs->fomem, file->fomem_key);
-    destroyList(file->cls_list);
-    free( file->name );
-    free(file);
+    freeHead = boot->free_ptr;
+    last = clsHead;
+
+    for (  ; fat[last] != OFS_LAST_CLUSTER ; clsCnt++, last = fat[last] );
+
+    fat[last] = boot->free_ptr;
+    boot->free_ptr = clsHead;
+    boot->free_cls_cnt += clsCnt;
 
     return;
 }
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //  DENTRY OPS
@@ -386,166 +332,6 @@ cleanup:
 }
 
 
-int ofsInsertDentry( OFS_t * ofs, OFSFile_t * file, OFSDentry_t * dent ) {
-
-    if ( ! ( ofs && file && dent ) )
-        return -1;
-
-    if ( file->flags & OFS_FLAG_INVALID )
-        return -1;
-
-    if ( ! (file->flags & OFS_FLAG_DIR) )
-        return -1;
-
-    OFSDir_t * dir = (OFSDir_t *) file;
-    OFSCluster_t * cls;
-    OFSDentry_t * sample;
-    OFSDentry_t * dlist;
-    OFSPtrList_t * plist;
-
-    plist = file->cls_list;
-    
-    if ( dir->last_entry_index == (ofs->cls_dentries - 1) )
-        if ( ofsExtendFile(ofs, file) )
-            goto cleanup;
-        else
-            dir->last_entry_index = OFS_DIR_NO_ENTRIES;
-
-    cls = ofsGetCluster(ofs, plist->tail);
-    dlist = (OFSDentry_t *)cls->data;
-    sample = &dlist[ dir->last_entry_index + 1 ];
-
-    memcpy(sample, dent, sizeof(OFSDentry_t));
-
-    dir->entries++;
-    dir->last_entry_index++;
-
-    return 0;
-
-cleanup:
-    return -1;
-}
-
-
-bool _ofsDeleteDentryIterator ( OFSDentry_t * dentry, void * extra [5] ) {
-    OFSPtr_t * dCls = (OFSPtr_t *) extra[0] ;
-    off_t * dIdx = (off_t *) extra[1];
-    char * fname = (char *) extra[2];
-    size_t * fnsize = (size_t * ) extra[3];
-    OFS_t * ofs = (OFS_t *) extra[4];
-    bool * flagFound = (bool *) extra[5];
-
-    *dIdx += 1;
-
-    if ( *dIdx >= ofs->cls_dentries ) {
-        *dCls += 1;
-        *dIdx = 0;
-    }
-
-
-    if ( dentry->file_flags == OFS_FLAG_FREE )
-        return true;
-
-    if ( dentry->file_flags & ( OFS_FLAG_INVALID | OFS_FLAG_HIDDEN ) )
-        return true;
-
-    if ( dentry->file_name_size != *fnsize )
-        return true;
-
-    if ( strncmp( dentry->file_name, fname, dentry->file_name_size ) != 0 )
-        return true;
-
-    *flagFound = true;
-
-    return false;
-}
-
-//  Cerca la dentry da rimuovere e la sovrascrive
-//  l'ultima dentry della directory, poi cancella
-//  l'ultima dentry.
-//  Se si svuota un cluster a causa della rimozione
-//  lo libera.
-void ofsDeleteDentry( OFS_t * ofs, OFSFile_t * dir, const char * fname, size_t fnsize ) {
-
-    if ( ! ( ofs && dir ) )
-        return;
-
-    if ( dir->flags & OFS_FLAG_INVALID )
-        return;
-
-    if ( ! (dir->flags & OFS_FLAG_DIR) )
-        return;
-
-
-    OFSDir_t * directory = (OFSDir_t *) dir;
-
-    OFSPtr_t dCls = 0;
-    off_t    dIdx = OFS_DIR_NO_ENTRIES;
-    OFSCluster_t * dPage = NULL;
-
-    OFSPtr_t lCls;
-    off_t    lIdx;
-    OFSCluster_t * lPage = NULL;
-
-    OFSDentry_t * target = NULL;
-    OFSDentry_t * last = NULL;
-    OFSDentry_t zeros = {0};
-    void * extra[6];
-    bool flagFound = false;
-
-    extra[0] = &dCls;
-    extra[1] = &dIdx;
-    extra[2] = fname;
-    extra[3] = &fnsize;
-    extra[4] = ofs;
-    extra[5] = &flagFound;
-
-    ofsDirectoryIterator(ofs, dir, _ofsDeleteDentryIterator , extra);
-
-    if ( flagFound == false )
-        return;
-
-    dCls = getItem(dir->cls_list, dCls);
-    if ( dCls == OFS_INVALID_CLUSTER )
-        return;
-
-    lCls = dir->cls_list->tail;
-    lIdx = directory->last_entry_index;
-
-    lPage = ofsGetCluster(ofs, lCls);
-    if ( lPage == NULL )
-        goto cleanup;
-
-
-    if ( dCls != lCls )
-        dPage = ofsGetCluster(ofs, dCls);
-    else
-        dPage = lPage;
-
-    last = &((OFSDentry_t *)lPage->data)[lIdx];
-    target = &((OFSDentry_t *)dPage->data)[dIdx];
-
-    memcpy( target, last, sizeof(OFSDentry_t) );
-    memcpy( last, &zeros, sizeof(OFSDentry_t));
-
-    directory->entries--;
-
-    if ( directory->entries && (directory->last_entry_index == 0) ){ // Restringe il file solo se avanzano entry
-        directory->last_entry_index = ofs->cls_dentries;
-        ofsShrinkFile(ofs, dir);
-    }else
-        directory->last_entry_index--;
-
-    ofsFreeCluster(lPage);
-
-    if ( dCls != lCls )
-        ofsFreeCluster(dPage);
-
-cleanup:
-    return;
-}
-
-
 void ofsFreeDentry( OFSDentry_t * dent ) {
     if ( ! dent )
         return;
@@ -554,244 +340,196 @@ void ofsFreeDentry( OFSDentry_t * dent ) {
 }
 
 
-OFSFile_t * ofsGetPathFile( OFS_t * ofs, char * path ) {
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  FILE OPS
+//
 
-    if ( ! ( path && ofs ) )
+
+OFSDentry_t * ofsCreateEmptyFile( OFS_t * ofs, const char * fname, size_t fnsize, OFSFlags_t flags ) {
+    if ( ! ofs )
         return NULL;
 
-    OFSFile_t * ret = NULL;
-    OFSDentry_t * link = NULL;
-    size_t arr_len = 0;
-    char ** path_arr = NULL;
+    if ( fnsize > OFS_FILENAME_SAMPLE_SIZE )
+        return NULL;
 
-    if ( path[0] != '/' )
+    if ( flags == OFS_FLAG_FREE )
+        return NULL;
+
+
+    OFSDentry_t * ret   = NULL;
+    OFSCluster_t * cls  = NULL;
+    OFSPtr_t cptr       = OFS_INVALID_CLUSTER;
+
+    ret = calloc( 1, sizeof(OFSDentry_t) );
+    if ( ! ret )
         goto cleanup;
 
-    path += 1;  // ignora root
-
-    path_arr = tokenize(path, '/');
-
-    if ( path_arr == NULL )
+    cptr = ofsAllocClusters(ofs, 1);
+    if ( cptr == OFS_INVALID_CLUSTER )
         goto cleanup;
 
-    for ( ; path_arr[arr_len] != NULL ; arr_len++ ) ;
-
-    ret = ofs->root_dir;
-
-    for ( size_t i = 0 ; i < arr_len ; i++ ) {
-
-        // controlla che il nodo corrente sia una directory
-        if ( ! ( ret->flags & OFS_FLAG_DIR ) )
+    if ( flags & OFS_FLAG_DIR ) {
+        cls = ofsGetCluster(ofs, cptr);
+        if ( ! cls )
             goto cleanup;
-
-        link = ofsGetDentry(ofs, ret, path_arr[i], strlen(path_arr[i]));
-
-        if ( link == NULL )
-            goto cleanup;
-
-        ofsCloseFile(ofs, ret);
-        
-        // apre il file e libera le risorse
-        ret = ofsOpenFile(ofs, link);
-        ofsFreeDentry(link);
+        memset( cls->data, 0, cls->size );
+        ofsFreeCluster(cls);
+        cls = NULL;
     }
 
-    free_str_arr(path_arr);
+    if ( fname )
+        memcpy( &ret->file_name, fname, fnsize );
+    ret->file_name_size = fnsize;
+    ret->file_flags = flags;
+    ret->file_size = 0;
+    ret->file_first_cls = cptr;
 
     return ret;
 
 cleanup:
 
+    if ( cptr != OFS_INVALID_CLUSTER )
+        ofsDeallocClusters(ofs, cptr);
+
+    if ( cls )
+        ofsFreeCluster(cls);
+
     if ( ret )
-        ofsCloseFile(ofs, ret);
-
-    if ( link )
-        ofsFreeDentry(link);
-
-    if ( path_arr )
-        free_str_arr(path_arr);
+        free(ret);
 
     return NULL;
 }
 
 
+OFSFile_t * ofsOpenFile( OFS_t * ofs, OFSDentry_t * dentry ) {
+
+    if ( !( ofs && dentry ) )
+        return NULL;
+
+    if ( dentry->file_flags & OFS_FLAG_INVALID )
+        return NULL;
+
+    OFSFile_t * ret         = NULL;
+    OFSFileName_t * name    = NULL;
+    OFSPtrList_t * clist    = NULL;
+    NumHTKey_t fomem_key    = OFS_INVALID_CLUSTER;
+    unsigned long objSize   = 0;
+
+    if ( (ret = numHTGet(ofs->fomem, dentry->file_first_cls)) )
+        return ret;
+    else
+        ret = NULL;
 
 
-int ofsDirectoryIterator( OFS_t * ofs, OFSFile_t * dir, directory_iterator callback, void * extra ){
+    if ( dentry->file_flags & OFS_FLAG_DIR )
+        objSize = sizeof( OFSDir_t );
+    else
+        objSize = sizeof( OFSFile_t );
 
-    if ( ! ( ofs && dir && callback ) )
-        return -1;
-
-    if ( dir->flags & OFS_FLAG_INVALID )
-        return -1;
-
-    if ( ! (dir->flags & OFS_FLAG_DIR) )
-        return -1;
-    
-
-    OFSPtrList_t * pList    = NULL;
-    OFSDentry_t * sample    = NULL;
-    OFSDentry_t * dentryList= NULL;
-    OFSCluster_t * cls      = NULL;
-    bool flagRun;
-
-    pList = dir->cls_list;
-    flagRun = true;
-
-    for ( OFSPtr_t cindex = 0 ; (cindex < pList->size) && flagRun ; cindex++ ) {
-        cls = ofsGetCluster(ofs, getItem(pList, cindex));
-
-        if ( cls == NULL )
-            goto cleanup;
-
-        dentryList = (OFSDentry_t *) cls->data;
-
-        for ( uint64_t i = 0; i < (cls->size / sizeof(OFSDentry_t) ); i++ ) {
-            if ( callback( &dentryList[i], extra ) )
-                continue;
-
-            flagRun = false;
-            break;
-        
-        }
-
-        ofsFreeCluster(cls);
-    }
-
-
-    return 0;
-
-cleanup:
-
-    return -1;
-
-}
-
-
-
-
-
-OFSPtr_t ofsAllocClusters( OFS_t * ofs, size_t cnt ) {
-    if ( ! ( ofs && cnt ) )
-        return OFS_INVALID_CLUSTER;
-
-    OFSBoot_t * boot    = ofs->boot;
-    OFSPtr_t * fat      = ofs->fat;
-    OFSPtr_t freeHead;
-    OFSPtr_t last;
-
-    if ( boot->free_cls_cnt < cnt )
+    ret = (OFSFile_t *) calloc( 1, objSize );
+    if ( ! ret )
         goto cleanup;
 
-    freeHead = boot->free_ptr;
-    last = freeHead;
 
-    for ( size_t i = 1 ; i < cnt ; i++, last = fat[last] );
+    name = (OFSFileName_t *) calloc( 1, dentry->file_name_size );
+    if ( name == NULL )
+        goto cleanup;
 
-    boot->free_cls_cnt -= cnt;
-    boot->free_ptr = fat[last];
-    fat[last] = OFS_LAST_CLUSTER;
+    memcpy(name, dentry->file_name, dentry->file_name_size);
 
-    return freeHead;
+    
+    clist = createList(ofs->fat, dentry->file_first_cls);
+    if ( clist == NULL )
+        goto cleanup;
+
+
+    fomem_key = dentry->file_first_cls;
+    if ( numHTInsert(ofs->fomem, fomem_key, ret) )
+        goto cleanup;
+
+    ret->name       = name;
+    ret->cls_list   = clist;
+    ret->name_size  = dentry->file_name_size;
+    ret->flags      = dentry->file_flags;
+    ret->size       = dentry->file_size;
+    ret->fomem_key  = fomem_key;
+    ret->refs       = 0;
+
+    // Se directory, inizializza l'oggetto
+    if ( ret->flags & OFS_FLAG_DIR ) {
+        OFSDir_t * dret = (OFSDir_t *)ret;
+        OFSCluster_t * cls = NULL;
+        OFSDentry_t * dList;
+        OFSDentry_t * sample;
+        off_t    ecnt = 0;
+
+        cls = ofsGetCluster(ofs, ret->cls_list->tail);
+        if ( cls == NULL )
+            goto cleanup;
+        dList = (OFSDentry_t *) cls->data;
+
+        // Conta le entry occupate nell'ultimo cluster
+        // le dentry sono disposte ammassate in cima al
+        // cluster mentre in fondo rimangono quelle libere
+        for ( ; ecnt < ofs->cls_dentries && (dList[ecnt].file_flags != OFS_FLAG_FREE) ; ecnt++ );
+
+        dret->entries = ((ret->cls_list->size - 1) * ofs->cls_dentries ) + ecnt;
+        dret->last_entry_index = ecnt - 1;
+        
+    }
+
+    return ret;
+    
 
 cleanup:
-    return OFS_INVALID_CLUSTER;
+
+    if ( name )
+        free(name);
+
+    if ( clist )
+        destroyList(clist);
+
+    if ( fomem_key != OFS_INVALID_CLUSTER )
+        numHTRemove(ofs->fomem, fomem_key);
+
+    if (ret)
+        free(ret);
+
+    return NULL;
 }
 
-void ofsDeallocClusters( OFS_t * ofs, OFSPtr_t clsHead ) {
 
-    if ( ! ofs )
+void ofsCloseFile( OFS_t * ofs,  OFSFile_t * file ) {
+    if ( ! file )
         return;
 
-    if (clsHead == OFS_INVALID_CLUSTER ||
-        clsHead == OFS_RESERVED_CLUSTER ||
-        clsHead == OFS_LAST_CLUSTER )
+    if ( file == ofs->root_dir )
         return;
 
-    OFSBoot_t * boot    = ofs->boot;
-    OFSPtr_t * fat      = ofs->fat;
-    OFSPtr_t freeHead;
-    OFSPtr_t last;
-    size_t clsCnt = 1;
+    if ( file->refs > 0 )
+        return;
 
-    freeHead = boot->free_ptr;
-    last = clsHead;
-
-    for (  ; fat[last] != OFS_LAST_CLUSTER ; clsCnt++, last = fat[last] );
-
-    fat[last] = boot->free_ptr;
-    boot->free_ptr = clsHead;
-    boot->free_cls_cnt += clsCnt;
+    numHTRemove(ofs->fomem, file->fomem_key);
+    destroyList(file->cls_list);
+    free( file->name );
+    free(file);
 
     return;
 }
 
 
-
-
-int ofsExtendFile( OFS_t * ofs, OFSFile_t * file ) {
-    if ( ! ( ofs && file ) )
-        return -1;
-
-    OFSPtrList_t * pList = file->cls_list;
-    OFSPtr_t freeHead;
-    bool flagAppend = false;
-
-    freeHead = ofsAllocClusters(ofs, 1);
-    if ( freeHead == OFS_INVALID_CLUSTER )
-        goto cleanup;
-
-    ofs->fat[ pList->tail ] = freeHead;
-    flagAppend = appendItem(pList, freeHead) != OFS_INVALID_CLUSTER;
-
-    if ( ! flagAppend )
-        goto cleanup;
-
-    //  Il cluster potrebbe essere sporco falsando
-    //  struttura della directory
-    if ( file->flags & OFS_FLAG_DIR ) {
-        OFSCluster_t * cls = ofsGetCluster(ofs, freeHead);
-        if ( ! cls )
-            goto cleanup;
-
-        memset( cls->data, '\0', cls->size );
-
-        ofsFreeCluster(cls);
-    }
-
-    return 0;
-
-cleanup:
-
-    if ( flagAppend )
-        popItem(pList);
-
-    return -1;
-
-}
-
-int ofsShrinkFile( OFS_t * ofs, OFSFile_t * file ) {
-    if ( ! ( ofs && file ) )
-        return -1;
-
-    OFSPtrList_t * pList= file->cls_list;
-    OFSPtr_t tail;
-
-    tail = popItem(pList);
-    if ( tail == OFS_INVALID_CLUSTER )
-        return -1;
-
-    ofsDeallocClusters(ofs, tail);
-
-    if ( pList->size > 0 )
-        ofs->fat[ pList->tail ] = OFS_LAST_CLUSTER;
-
-
-    return 0;
-
+OFSFile_t * ofsGetFile( OFS_t * ofs, NumHTKey_t key ) {
+    if ( ! ofs )
+        return NULL;
+    
+    return numHTGet(ofs->fomem, key);
 }
 
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  FILE HANDLE OPS
+//
 
 
 
@@ -851,12 +589,3 @@ OFSFileHandle_t * ofsGetFileHandle( OFS_t * ofs, off_t idx ) {
 
     return arrayGet(ofs->fhmem, idx);
 }
-
-
-OFSFile_t * ofsGetFile( OFS_t * ofs, NumHTKey_t key ) {
-    if ( ! ofs )
-        return NULL;
-    
-    return numHTGet(ofs->fomem, key);
-}
-

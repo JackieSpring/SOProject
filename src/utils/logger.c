@@ -5,26 +5,28 @@
 #define LOG_MSG_STR "( MSG ) "
 #define LOG_ERR_STR "[ ERR ] "
 
-struct LoggerStruct {
-    FILE * file;
-};
 
 
-Logger * newLogger( FILE * logfile ) {
+Logger * newLogger( char * logfile ) {
+
+    FILE * fp = NULL;
 
     if ( logfile == NULL )
-        logfile = stdout;
+        fp = stdout;
+    fp = fopen( logfile, "a" );
+
 
     Logger * ret = malloc( sizeof( Logger ) );
     if ( ret == NULL )
         return NULL;
 
-    ret->file = logfile;
+    ret->file = fp;
 
     return ret;
 }
 
 void closeLogger( Logger * logger ) {
+    fclose( logger->file );
     free( logger );
 }
 

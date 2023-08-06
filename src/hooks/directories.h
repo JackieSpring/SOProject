@@ -18,6 +18,7 @@
 #include "../utils/logger.h"
 #include "../ofs/ofsModel.h"
 #include "../ofs/ofsStructures.h"
+#include "../ofs/ofsUtils.h"
 
 
 int ofs_opendir (const char * path, struct fuse_file_info * fi);

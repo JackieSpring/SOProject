@@ -53,7 +53,7 @@ int ofs_getattr(const char * path, struct stat *stbuf, struct fuse_file_info *fi
 
     memset( stbuf, 0, sizeof( struct stat ) );
 
-    stbuf->st_dev = ofs->dev->dstat.st_dev;
+    stbuf->st_dev = ofs->dev->dev;
     stbuf->st_uid = getuid();
     stbuf->st_gid = getgid();
 
@@ -188,6 +188,36 @@ cleanup:
         free(newPath);
 
     return -errcode;
+}
+
+int ofs_statfs (const char * path, struct statvfs * stat) {
+    
+    struct fuse_context * fc = fuse_get_context();
+    OFS_t * ofs         = fc->private_data;
+    OFSFile_t * file    = NULL;
+    int errcode = 0;
+
+    file = ofsGetPathFile(ofs, path);
+    if ( ! file )
+        cleanup_errno(ENOENT);
+
+    stat->f_bsize   = ofs->boot->sec_size;
+    stat->f_frsize  = ofs->boot->sec_size;
+    stat->f_blocks  = ofs->boot->sec_cnt;
+    stat->f_bfree   = ofs->boot->free_cls_cnt * ofs->boot->cls_size;
+    stat->f_bavail  = stat->f_bfree;
+    stat->f_files   = ofs->boot->cls_cnt;
+    stat->f_ffree   = ofs->boot->free_cls_cnt;
+    stat->f_favail  = stat->f_ffree;
+    stat->f_namemax = OFS_FILENAME_SAMPLE_SIZE;
+
+    ofsCloseFile(ofs, file);
+
+    return 0;
+
+cleanup:
+    return -errcode;
+
 }
 
 

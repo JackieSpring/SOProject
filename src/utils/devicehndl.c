@@ -1,8 +1,6 @@
 
 #include "devicehndl.h"
 
-
-
 struct DeviceStruct;
 
 
@@ -13,6 +11,8 @@ struct DeviceStruct;
 
 DEVICE * openDev( char * path ) {
     DEVICE * ret;
+    struct stat dstat;
+    struct statvfs dstatvfs;
 
     ret = malloc( sizeof( DEVICE ) );
     if ( ret == NULL )
@@ -22,8 +22,28 @@ DEVICE * openDev( char * path ) {
     if ( ret->dd < 0 )
         goto cleanup;
 
-    if ( fstat( ret->dd, &ret->dstat ) < 0 )
+    if ( fstat( ret->dd, &dstat ) < 0 )
         goto cleanup;
+
+
+    if ( S_ISBLK(dstat.st_mode) ) {
+        ioctl( ret->dd, BLKSSZGET, &ret->blksize );
+        ioctl( ret->dd, BLKGETSIZE, &ret->blkcnt );
+        ret->size = ret->blkcnt * ret->blksize;
+    }
+    else if ( S_ISREG(dstat.st_mode) ) {
+        fstatvfs( ret->dd, &dstatvfs );
+        ret->blksize = dstatvfs.f_bsize;
+        ret->blkcnt = dstat.st_size / ret->blksize;
+        ret->size = ret->blksize * ret->blkcnt;
+    }
+    else
+        goto cleanup;
+
+    ret->mode = dstat.st_mode;
+    ret->uid = dstat.st_uid;
+    ret->gid = dstat.st_gid;
+    ret->dev = dstat.st_dev;
 
     return ret;
     
