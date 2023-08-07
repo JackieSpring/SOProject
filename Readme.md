@@ -17,6 +17,7 @@ verrà creato un file chiamato 'ofs.fs'.
 // Eseguire
 Per eseguire il programma è suffieciente indicargli il mount-point
 del file system.
+
     ./ofs.fs <mount-directory>
 
 Verrà creato un file immagine /tmp/sdo0 che fungerà da device di
@@ -33,6 +34,7 @@ attraverso la directory di mount.
 
 // Unmount
 Per smontare il file system si esegua
+
     fusermount -u <mount-directory>
 
 // Operazioni
