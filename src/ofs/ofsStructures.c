@@ -3,6 +3,84 @@
 
 /*
 
+// LO STANDARD
+Il file system OilFiSh è uno standard indipendente e creato 
+unicamente per questo progetto, è un file system basato su
+tabella FAT di cluster di settori, pertanto non opera sul
+singolo settore del device ma su un insieme di settori; 
+queste caratteristiche rendono OFS sensibile a frammentazione
+interna. 
+
+// LA TABELLA FAT
+La tabella fat di OFS è analoga alla tabella che si può
+trovare nel file system FAT32, utilizza indici a 32 bit
+per identificare i cluster e riserva alcuni cluster a scopo
+di funzionamento:
+    - Boot Cluster
+        Il primo cluster del device è riservato alla
+        struttura di boot.
+    - FAT Cluster
+        Il secondo cluster del device contiene la tabella
+        fat stessa
+    - Reserved Clusters
+        I due cluster successivi alla tabella sarebbero
+        liberi per l'utilizzo, ma vengono riservati
+    - Special Clusters
+        i Cluster ( -2, -1, 0 ) sono indici speciali usati
+        a scopi di funzionamento del file system.
+
+Dunque quattro cluster sono usati dal file system mentre i
+restanti son cluster dati. La tabella FAT indicizza i cluster
+partendo dal settore specificato nella struttura Boot, e non 
+dall'inizio del device.
+La FAT si presenta come una linked list di Cluster dove ogni
+file è rappresentato da una lista collegata di cluster terminati
+da OFS_LAST_CLUSTER, che in questa implementazione è il cluster 0;
+i cluster liberi sono a loro volta collegati tra loro affinché
+l'allocazione / deallocazione di nuovi cluster sia rapida.
+
+// LA STRUTTURA BOOT
+La struttura boot racchiude tutte le informazioni sul device
+in uso e sul suo partizionamento necessarie al funzionamento
+del file system, a partire dalla dimensione e numero dei settori
+e dei cluster di settori, la posizione della tabella FAT e
+l'indice di inizio dei cluster allocati e della root directory.
+Per identificare la struttura viene usato un magic number di tre
+byte ( i caratteri ascii "OFS" ), se questo codice non dovesse
+essere trovato allora il device non è stato formattato secondo
+lo standard OilFiSh ed è inutilizzabile allo stato attuale.
+I cluster dati incominciano a partire dal settore indicato nel
+campo "first_sec", utilizzato per tutte le operazioni di 
+indirizzamento dei cluster.
+
+// I FILE
+Come detto in precedenza i file sono rappresentati nella fat
+come catene di cluster dati, i cluster che li compongono non
+contengono informazioni sul file, ma solo i suoi dati; per
+ottenere le specifiche sul file sono necessarie le dentry
+che li referenziano.
+I file utilizzabili possono essere di tre tipi: regolari 
+directory, invalidi; oltre al tipo i file possono essere
+readonly o nascosti, se il file è specificato come 
+nascosto allora non deve comparire nella lettura della directory.
+I file sono identificati da un nome che in questa implementazione
+può avere lunghezza massima di 18 caratteri.
+
+
+// LA STRUTTURA DENTRY E LE DIRECTORY
+Dal punto di vista del partizionamento del device e della FAT,
+in OFS non c'è differenza tra file e directory se non nel loro
+contenuto: le directory sono file che devono essere interpretati
+come un array di Dentry. Le Dentry sono una struttura di 32 byte
+contenente i dati del file referenziato e l'indice del suo primo
+cluster; questi dati includono le flag, la dimensione e il nome
+del file che lo identifica all'interno di una directory. Una
+dentry è considerata "libera", cioè sovrascrivibile, se le flag
+sono azzerate ( cioè uguali a OFS_FLAG_FREE ).
+In OFS non esiste un sistema di record degli accessi ai file, ne
+di possesso di un file, l'unica limitazione è la flag READONLY che
+impedisce la scrittura su un file (o directory).
+
 */
 
 
@@ -53,8 +131,6 @@ extern inline off_t ofsSectorToByte( OFSBoot_t * ofsb, OFSSec_t sp ) {
 
 
 int ofsFormatDevice( DEVICE * dev ) {
-
-    puts("DO FORMAT");
 
     OFSBoot_t boot;
     OFSDentry_t rootd;
@@ -144,8 +220,6 @@ cleanup:
 
 bool ofsIsDeviceFormatted( DEVICE * dev ) {
     uint32_t magic = 0;
-
-    puts("IS FORMATTED");
 
     if ( readDev( dev, &magic, 3, 0 ) < 3 )
         return false;

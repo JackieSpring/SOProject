@@ -29,7 +29,6 @@ typedef struct OFSFileStruct_t {
     OFSFileName_t * name;
     OFSFileNameSize_t name_size;
     OFSPtrList_t  * cls_list;
-    OFSPtr_t        parent_dir;
     OFSFlags_t      flags;
     uint64_t        size;
     NumHTKey_t      fomem_key;
@@ -67,7 +66,9 @@ typedef struct OFSClusterStruct_t {
 } OFSCluster_t;
 
 
-
+//  FILE SYSTEM OBJECT
+//  Rappresenta il file system in uso e 
+//  mantiene memoria delle risorse aperte
 typedef struct OFSStruct_t {
     DEVICE    * dev;
 

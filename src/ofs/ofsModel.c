@@ -2,6 +2,93 @@
 #include "ofsModel.h"
 
 
+/*
+
+// IL MODELLO DEL FILE SYSTEM
+
+La struttura OFS_t rappresenta un file system aperto e referenzia quattro
+strutture fondamentali:
+    - il boot cluster
+    - la tabella fat
+    - Array dei file handle
+    - Mappa dei file aperti
+
+All'apertura del file system il cluster di boot e la tabella fat vengono
+recuperati dal device e mappati in memoria e lo resteranno fino alla
+chiusura del file system; successivamente vengono creati l'Array dei file
+handle e la mappa dei file aperti. Il primo file a venire registrato nella
+mappa è la root directory, nel caso in cui la root directory ancora non
+esista nel file system, viene creata al volo. La root directory è un file
+che gode di permessi speciali, è l'unico file che non può essere chiuso
+e privo di un parent.
+
+// FILE vs FILE HANDLE
+
+Le strutture file e i file handle sono entità distinte, per manipolare 
+un file non è necessario un file handle, ma è necessaria un struttura
+file; in ogni momento può esistere una sola copia di una struttura file
+memorizzata nella mappa dei file, ma potrebbe avere molteplici o nessun
+file handle che la referenziano.
+Questo perché mentre le strutture file sono rappresentazioni dei file
+sul device, i file handle sono dei riferimenti ad uso esclusivo dei
+processi.
+Nella mappa dei file aperti, essi sono identificati dal loro primo
+cluster, mentre i file handle sono indicizzati dalla loro posizione
+nell'array dei file handle; questo indice viene usato dagli hook per
+recuperare il file handle.
+Nonostante queste differenze un file è dipendente dai suoi file handle
+per quanto concerne la sua chiusura, non è possibile chiudere un file
+che abbia dei file handle attivi su di se.
+
+// IL MODELLO FILE
+
+La struttura OFSFile_t possiede quattro campi fondamentali:
+    - dati del file
+    - chiave di riconoscimento nella mappa dei file
+    - lista dei cluster
+    - numero di riferimenti
+
+I dati sono recuperati dalla dentry passata a ofsFileOpen e sono
+    - nome
+    - numero di byte del nome
+    - dimensione del file (0 per le directory)
+    - flag del file
+
+La lista dei cluster è una semplice lista degli indici dei cluster
+e non di oggetti OFSCluster_t come si potrebbe pensare, questa
+lista viene costruita a partire dal primo cluster usando la tabella
+fat; dopo la creazione i dati della lista sono indipendenti dalla
+tabella fat, pertanto ad ogni modifica della tabella è anche
+necessaria una modifica della lista.
+La chiave che identifica il file nella mappa non è altro che il primo
+cluster della lista, questa scelta è giudata dalla semplicità nella
+realizzazione della mappa e dall'impossibilità di creare un file
+privo di cluster.
+Il numero di riferimenti tiene traccia del numero di file handle 
+attivi sul file e viene incrementato/decrementato dalle chiamate a
+ofsOpenFileHandle / ofsCloseFileHandle .
+
+// IL MODELLO DIRECTORY
+
+Il modello directory è una sottoclasse del file, possiede due campi
+aggiuntivi, ma il più importante è last_entry_index.
+Il campo last_entry_index memorizza l'indice dell'ultima entry
+occupata nella directory rispetto all'ultimo cluster; questa
+informazione è rilevante per i seguenti motivi:
+(1) Efficienza
+    Conoscendo l'indice dell'ultima dentry non è necessario
+    esplorare tutto il cluster per trovare una dentry (che potrebbe 
+    anche essere molto esteso)
+
+(2) Frammentazione
+    Gli algoritmi di inserimento / rimozione riducono la frammentazione
+    interna operando solo sull'ultima dentry della directory,
+    "accodando" durante gli inserimenti e "riducendo" duranet le rimozioni.
+
+
+*/
+
+
 
 OFS_t * ofsOpen( DEVICE * dev ) {
     if ( dev == NULL )
